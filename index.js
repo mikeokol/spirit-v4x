@@ -1,11 +1,10 @@
-// index.js — Spirit Core v3.3 (Server Entrypoint)
+// index.js — Spirit Core v4.x (Server Entrypoint)
 // ------------------------------------------------------
 
 import express from "express";
-import bodyParser from "body-parser";
+import cors from "cors";
 import "dotenv/config";
 
-import supabase from "./supabase.js";
 import healthRouter from "./routes/health.js";
 import chatRouter from "./routes/chat.js";
 
@@ -13,7 +12,18 @@ import chatRouter from "./routes/chat.js";
 //  Setup
 // ─────────────────────────────────────────────
 const app = express();
-app.use(bodyParser.json());
+
+// JSON body parser
+app.use(express.json({ limit: "1mb" }));
+
+// CORS — required for Lovable frontend
+app.use(
+  cors({
+    origin: "*", // allow all frontend origins
+    methods: ["GET", "POST"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  })
+);
 
 // ─────────────────────────────────────────────
 //  Routes
@@ -25,8 +35,8 @@ app.use("/chat", chatRouter);
 app.get("/", (_req, res) => {
   res.status(200).json({
     ok: true,
-    service: "Spirit v3.3",
-    message: "You have arrived. Breathe. We begin.",
+    service: "Spirit v4.x",
+    message: "You have arrived. Spirit is online.",
     ts: new Date().toISOString(),
   });
 });
@@ -34,7 +44,9 @@ app.get("/", (_req, res) => {
 // ─────────────────────────────────────────────
 //  Start Server
 // ─────────────────────────────────────────────
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`✅ Spirit API running on port ${PORT}`));
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, () =>
+  console.log(`✅ Spirit API (v4.x) running on port ${PORT}`)
+);
 
 export default app;
