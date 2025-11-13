@@ -1,5 +1,13 @@
+<<<<<<< HEAD
 // index.js — Spirit v4.x Core Server (with rate limiting)
 // -------------------------------------------------------
+=======
+// index.js — Spirit Core v4.x (Server Entrypoint)
+// ------------------------------------------------------
+
+import express from "express";
+import cors from "cors";
+>>>>>>> 6fae1f4 (Upgrade Spirit backend to v4.x entrypoint)
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
@@ -10,6 +18,7 @@ import chatRouter from "./routes/chat.js";
 
 const app = express();
 
+<<<<<<< HEAD
 // ─────────────────────────────────────────────
 //  CORS — only your apps + localhost
 // ─────────────────────────────────────────────
@@ -35,10 +44,20 @@ app.use(
       console.warn("[CORS] Blocked origin:", origin);
       return callback(new Error("Not allowed by CORS"));
     },
+=======
+// JSON body parser
+app.use(express.json({ limit: "1mb" }));
+
+// CORS — required for Lovable frontend
+app.use(
+  cors({
+    origin: "*", // allow all frontend origins
+>>>>>>> 6fae1f4 (Upgrade Spirit backend to v4.x entrypoint)
     methods: ["GET", "POST"],
     allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
+<<<<<<< HEAD
 
 // ─────────────────────────────────────────────
 //  Global middleware
@@ -52,6 +71,8 @@ const chatLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
 });
+=======
+>>>>>>> 6fae1f4 (Upgrade Spirit backend to v4.x entrypoint)
 
 // ─────────────────────────────────────────────
 //  Routes
@@ -64,7 +85,11 @@ app.get("/", (_req, res) => {
   res.status(200).json({
     ok: true,
     service: "Spirit v4.x",
+<<<<<<< HEAD
     message: "You have arrived. Breathe. We begin.",
+=======
+    message: "You have arrived. Spirit is online.",
+>>>>>>> 6fae1f4 (Upgrade Spirit backend to v4.x entrypoint)
     ts: new Date().toISOString(),
   });
 });
@@ -72,7 +97,14 @@ app.get("/", (_req, res) => {
 // ─────────────────────────────────────────────
 //  Start Server
 // ─────────────────────────────────────────────
+<<<<<<< HEAD
 const PORT = process.env.PORT || 3000;
+=======
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, () =>
+  console.log(`✅ Spirit API (v4.x) running on port ${PORT}`)
+);
+>>>>>>> 6fae1f4 (Upgrade Spirit backend to v4.x entrypoint)
 
 app.listen(PORT, () => {
   console.log(`🜂 Spirit v4.x listening on port ${PORT}`);
