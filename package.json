@@ -1,0 +1,40 @@
+{
+  "name": "spirit-v4x",
+  "version": "4.0.0",
+  "description": "Spirit v4.x — Hybrid-Intelligent AI Coach (Mind • Body • Brand)",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js",
+    "lint": "eslint . --ext .js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "body-parser": "^1.20.3",
+    "chalk": "^5.3.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.1",
+    "openai": "^4.53.0",
+    "ora": "^7.0.1"
+  },
+  "devDependencies": {
+    "eslint": "^9.13.0",
+    "nodemon": "^3.1.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "keywords": [
+    "spirit",
+    "ai",
+    "coach",
+    "hybrid",
+    "openai",
+    "supabase",
+    "mind-body-brand"
+  ],
+  "author": "Mike Umesumbu",
+  "license": "ISC"
+}
