@@ -286,13 +286,14 @@ router.post("/", async (req, res) => {
     }
 
     return res.json({
-      ok: true,
-      service: "Spirit v4.x",
-      mode,
-      tone: tone || "default",
-      reply,
-      ts: new Date().toISOString(),
-    });
+  ok: true,
+  service: "Spirit v4.x",
+  mode,
+  tone: tone || "default",
+  reply,
+  userId: effectiveUserId || null,   // ← add this line
+  ts: new Date().toISOString(),
+});
   } catch (err) {
     console.error("[Spirit /chat error]", err?.message || err);
 
