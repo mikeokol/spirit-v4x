@@ -1,8 +1,9 @@
-// index.js — Spirit v4.x Core Server
-// ----------------------------------
+// index.js — Spirit v4.x Core Server (with rate limiting)
+// -------------------------------------------------------
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
+import rateLimit from "express-rate-limit";
 
 import healthRouter from "./routes/health.js";
 import chatRouter from "./routes/chat.js";
@@ -10,7 +11,7 @@ import chatRouter from "./routes/chat.js";
 const app = express();
 
 // ─────────────────────────────────────────────
-//  CORS — Lovable previews + localhost
+//  CORS — only your apps + localhost
 // ─────────────────────────────────────────────
 const allowedOrigins = [
   "http://localhost:3000",
@@ -24,8 +25,7 @@ const allowedOrigins = [
 app.use(
   cors({
     origin: (origin, callback) => {
-      // Allow non-browser tools (like curl, server-to-server)
-      if (!origin) return callback(null, true);
+      if (!origin) return callback(null, true); // curl / server-to-server
 
       const allowed = allowedOrigins.some((o) =>
         o instanceof RegExp ? o.test(origin) : o === origin
@@ -41,14 +41,25 @@ app.use(
 );
 
 // ─────────────────────────────────────────────
-//  Middleware + Routes
+//  Global middleware
 // ─────────────────────────────────────────────
 app.use(express.json());
 
-app.use("/health", healthRouter);
-app.use("/chat", chatRouter);
+// Simple rate limiter for /chat (per IP)
+const chatLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 20,             // 20 requests / minute / IP
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
-// Root route — simple sanity check
+// ─────────────────────────────────────────────
+//  Routes
+// ─────────────────────────────────────────────
+app.use("/health", healthRouter);
+app.use("/chat", chatLimiter, chatRouter);
+
+// Root route — sanity check
 app.get("/", (_req, res) => {
   res.status(200).json({
     ok: true,
