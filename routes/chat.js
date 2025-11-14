@@ -1,17 +1,11 @@
-// routes/chat.js — Spirit v4.x Intelligence Layer (Improved Identity Engine)
-// --------------------------------------------------------------------------
+// routes/chat.js — Spirit v4.x Intelligence Layer (with chat-style memory)
+// ------------------------------------------------------------------------
 import express from "express";
 import OpenAI from "openai";
 import supabase from "../supabase.js";
 
 const router = express.Router();
-
-// OpenAI client + config guardrails
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
-const MODEL = process.env.SPIRIT_MODEL || "gpt-4o-mini";
-const MAX_TOKENS = Number(process.env.SPIRIT_MAX_TOKENS || 400);
-const TEMPERATURE = Number(process.env.SPIRIT_TEMPERATURE || 0.6);
 
 // ─────────────────────────────────────────────
 //  Mode classifier — Mind / Body / Brand / etc
@@ -19,10 +13,12 @@ const TEMPERATURE = Number(process.env.SPIRIT_TEMPERATURE || 0.6);
 function classifyMode(text = "") {
   const t = text.toLowerCase();
 
+  // Reflection / intention
   if (t.startsWith("i choose ") || t.includes("reflection") || t.includes("journal")) {
     return "reflection";
   }
 
+  // Body / training / diet
   if (
     t.includes("workout") ||
     t.includes("gym") ||
@@ -35,6 +31,7 @@ function classifyMode(text = "") {
     return "body";
   }
 
+  // Brand / content / creator
   if (
     t.includes("content") ||
     t.includes("video") ||
@@ -48,6 +45,7 @@ function classifyMode(text = "") {
     return "brand";
   }
 
+  // Deeper philosophical / oracle
   if (
     t.includes("meaning") ||
     t.includes("purpose") ||
@@ -59,6 +57,7 @@ function classifyMode(text = "") {
     return "oracle";
   }
 
+  // Mind coaching / mental structure
   if (
     t.includes("focus") ||
     t.includes("discipline") ||
@@ -70,47 +69,50 @@ function classifyMode(text = "") {
     return "mind";
   }
 
+  // Default hybrid coach
   return "coach";
 }
 
 // ─────────────────────────────────────────────
-//  System prompt builder — Spirit v4.x Brain
+//  System prompt builder — Spirit v4.x brain
 // ─────────────────────────────────────────────
 function buildSystemPrompt({ mode, tone, lastIntention, lastReflection }) {
   let toneDescriptor = "";
   switch (tone) {
     case "mystical":
       toneDescriptor =
-        "Use a calm, mystical, presence-first tone — grounded, reflective, slightly oracular.";
+        "Use a calm, mystical, presence-first tone, like an oracle that respects time and clarity.";
       break;
     case "high-performance":
       toneDescriptor =
-        "Use a direct, disciplined, elite-performer tone — sharp, focused, no fluff.";
+        "Use a high-performance, elite-athlete coach tone: direct, focused, no fluff.";
       break;
     case "casual":
       toneDescriptor =
-        "Use a relaxed, conversational tone — precise, supportive, grounded.";
+        "Use a relaxed, conversational tone, but still precise and actionable.";
       break;
     case "founder":
       toneDescriptor =
-        "Use a founder-to-founder tone — strategic, honest, encouraging, execution-focused.";
+        "Use a founder-to-founder tone: strategic, brutally honest, but encouraging.";
       break;
     default:
       toneDescriptor =
-        "Use Spirit's default tone: calm, disciplined, concise, identity-focused, lightly mystical.";
+        "Use Spirit's default tone: mystical, disciplined, supportive, concise, and action-focused.";
   }
 
   const modeLine = {
-    mind: "Focus on mental clarity, discipline, identity alignment, and self-understanding.",
+    mind: "Focus on mental clarity, discipline, self-understanding, and identity alignment.",
     body: "Focus on training, nutrition, recovery, and embodied discipline.",
-    brand: "Focus on content, storytelling, brand building, and creator leverage.",
+    brand: "Focus on content, brand, storytelling, and creator leverage.",
     reflection:
-      "Treat this as a reflection/intention. Mirror their state, help name it, and give ONE clear next step.",
+      "Treat this as a reflection/intention log. Help the user name their state and give one clear next move.",
     oracle:
-      "Zoom out with philosophical clarity, then land on grounded truth and one grounded direction.",
+      "Zoom out to deeper questions of meaning, human nature, and perspective — but always end with a concrete action.",
     coach:
-      "Hybrid coaching across mind, body, and brand — pick what the request implies.",
-  }[mode];
+      "Act as a hybrid coach across mind, body, and brand, choosing the most relevant pillar for the request.",
+    sanctuary:
+      "Act as the central sanctuary: respond as a hybrid identity guide across mind, body, and brand, with extra focus on presence and clarity.",
+  }[mode] || "Act as a hybrid coach across mind, body, and brand.";
 
   const previousContext = `
 Previous intention: ${lastIntention || "none recorded"}
@@ -154,7 +156,7 @@ Style rules:
 - Replies: 3–7 sentences unless the user asks for depth.
 - You may use *one short action list* only if it increases clarity.
 - Avoid generic motivational language.
-- Avoid “coach voice” unless mode=high-performance and user explicitly wants it.
+- Avoid “coach voice” unless mode=high-performance and the user explicitly wants it.
 - In ORACLE mode: zoom out, then land on grounded truth.
 - In REFLECTION mode: mirror, acknowledge, give one direction.
 - Presence first. Clarity second. Action third.
@@ -164,14 +166,14 @@ Your job: respond as Spirit v4.x with this identity, tone, and structure.
 }
 
 // ─────────────────────────────────────────────
-//  Supabase helpers — Reflections + Sessions
+//  Supabase helpers — reflections & sessions
 // ─────────────────────────────────────────────
 async function getLastContext(userId) {
   if (!userId) {
     return { lastIntention: null, lastReflection: null, lastMode: null };
   }
 
-  const { data: lastReflectionRow, error: reflectionError } = await supabase
+  const { data: lastReflectionRow } = await supabase
     .from("reflections")
     .select("intention, mode, created_at")
     .eq("user_id", userId)
@@ -179,20 +181,12 @@ async function getLastContext(userId) {
     .limit(1)
     .maybeSingle();
 
-  if (reflectionError) {
-    console.error("[Spirit] Supabase reflections error:", reflectionError.message);
-  }
-
-  const { data: sessionRow, error: sessionError } = await supabase
+  const { data: sessionRow } = await supabase
     .from("sessions")
     .select("last_intention, last_mode")
     .eq("user_id", userId)
     .limit(1)
     .maybeSingle();
-
-  if (sessionError) {
-    console.error("[Spirit] Supabase sessions error:", sessionError.message);
-  }
 
   return {
     lastIntention: sessionRow?.last_intention || null,
@@ -206,7 +200,7 @@ async function storeReflectionAndSession({ userId, prompt, mode, reply }) {
 
   const now = new Date().toISOString();
 
-  const { error: insertError } = await supabase.from("reflections").insert({
+  await supabase.from("reflections").insert({
     user_id: userId,
     intention: prompt,
     mode,
@@ -214,11 +208,7 @@ async function storeReflectionAndSession({ userId, prompt, mode, reply }) {
     created_at: now,
   });
 
-  if (insertError) {
-    console.error("[Spirit] Error inserting reflection:", insertError.message);
-  }
-
-  const { error: upsertError } = await supabase
+  await supabase
     .from("sessions")
     .upsert(
       {
@@ -229,17 +219,16 @@ async function storeReflectionAndSession({ userId, prompt, mode, reply }) {
       },
       { onConflict: "user_id" }
     );
-
-  if (upsertError) {
-    console.error("[Spirit] Error upserting session:", upsertError.message);
-  }
 }
 
 // ─────────────────────────────────────────────
-//  POST /chat — Main Intelligence Endpoint
+//  POST /chat — main intelligence endpoint
+//  Supports:
+//    - simple: { prompt, tone, sessionId }
+//    - chatty: { prompt, tone, sessionId, messages: [{role, content}, ...] }
 // ─────────────────────────────────────────────
 router.post("/", async (req, res) => {
-  const { prompt, userId, sessionId, tone } = req.body || {};
+  const { prompt, userId, sessionId, tone, mode: explicitMode, messages } = req.body || {};
   const text = typeof prompt === "string" ? prompt.trim() : "";
 
   if (!text) {
@@ -252,7 +241,8 @@ router.post("/", async (req, res) => {
   const effectiveUserId = userId || sessionId || null;
 
   try {
-    const mode = classifyMode(text);
+    const mode = explicitMode || classifyMode(text);
+
     const { lastIntention, lastReflection } = await getLastContext(effectiveUserId);
 
     const systemPrompt = buildSystemPrompt({
@@ -262,20 +252,37 @@ router.post("/", async (req, res) => {
       lastReflection,
     });
 
+    // Build chat-style history from frontend, if provided
+    const historyMessages = Array.isArray(messages)
+      ? messages
+          .filter(
+            (m) =>
+              m &&
+              typeof m.content === "string" &&
+              (m.role === "user" || m.role === "assistant")
+          )
+          .map((m) => ({
+            role: m.role,
+            content: m.content,
+          }))
+      : [];
+
     const completion = await client.chat.completions.create({
-      model: MODEL,
+      model: process.env.SPIRIT_MODEL || "gpt-4o-mini",
       messages: [
         { role: "system", content: systemPrompt },
+        ...historyMessages,
         { role: "user", content: text },
       ],
-      temperature: TEMPERATURE,
-      max_tokens: MAX_TOKENS,
+      temperature: Number(process.env.SPIRIT_TEMPERATURE || 0.6),
+      max_tokens: Number(process.env.SPIRIT_MAX_TOKENS || 400),
     });
 
     const reply =
       completion.choices?.[0]?.message?.content?.trim() ||
-      "I am here. What do you need right now?";
+      "I’m here. Let’s take one clear step. What do you need right now?";
 
+    // Store reflections only for reflection mode / "I choose ..."
     if (mode === "reflection" || text.toLowerCase().startsWith("i choose ")) {
       await storeReflectionAndSession({
         userId: effectiveUserId,
@@ -286,20 +293,20 @@ router.post("/", async (req, res) => {
     }
 
     return res.json({
-  ok: true,
-  service: "Spirit v4.x",
-  mode,
-  tone: tone || "default",
-  reply,
-  userId: effectiveUserId || null,   // ← add this line
-  ts: new Date().toISOString(),
-});
+      ok: true,
+      service: "Spirit v4.x",
+      mode,
+      tone: tone || "default",
+      reply,
+      ts: new Date().toISOString(),
+    });
   } catch (err) {
     console.error("[Spirit /chat error]", err?.message || err);
 
     return res.status(500).json({
       ok: false,
       error: "Spirit encountered an error while processing this request.",
+      details: err.message,
     });
   }
 });
