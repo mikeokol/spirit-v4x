@@ -5,7 +5,13 @@ import OpenAI from "openai";
 import supabase from "../supabase.js";
 
 const router = express.Router();
+
+// OpenAI client + config guardrails
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+const MODEL = process.env.SPIRIT_MODEL || "gpt-4o-mini";
+const MAX_TOKENS = Number(process.env.SPIRIT_MAX_TOKENS || 400);
+const TEMPERATURE = Number(process.env.SPIRIT_TEMPERATURE || 0.6);
 
 // ─────────────────────────────────────────────
 //  Mode classifier — Mind / Body / Brand / etc
@@ -13,12 +19,10 @@ const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 function classifyMode(text = "") {
   const t = text.toLowerCase();
 
-  // Reflection / intention
   if (t.startsWith("i choose ") || t.includes("reflection") || t.includes("journal")) {
     return "reflection";
   }
 
-  // Body / training / diet
   if (
     t.includes("workout") ||
     t.includes("gym") ||
@@ -31,7 +35,6 @@ function classifyMode(text = "") {
     return "body";
   }
 
-  // Brand / content / creator
   if (
     t.includes("content") ||
     t.includes("video") ||
@@ -45,7 +48,6 @@ function classifyMode(text = "") {
     return "brand";
   }
 
-  // Deeper philosophical / oracle
   if (
     t.includes("meaning") ||
     t.includes("purpose") ||
@@ -57,7 +59,6 @@ function classifyMode(text = "") {
     return "oracle";
   }
 
-  // Mind coaching / mental structure
   if (
     t.includes("focus") ||
     t.includes("discipline") ||
@@ -69,7 +70,6 @@ function classifyMode(text = "") {
     return "mind";
   }
 
-  // Default hybrid
   return "coach";
 }
 
@@ -171,7 +171,7 @@ async function getLastContext(userId) {
     return { lastIntention: null, lastReflection: null, lastMode: null };
   }
 
-  const { data: lastReflectionRow } = await supabase
+  const { data: lastReflectionRow, error: reflectionError } = await supabase
     .from("reflections")
     .select("intention, mode, created_at")
     .eq("user_id", userId)
@@ -179,12 +179,20 @@ async function getLastContext(userId) {
     .limit(1)
     .maybeSingle();
 
-  const { data: sessionRow } = await supabase
+  if (reflectionError) {
+    console.error("[Spirit] Supabase reflections error:", reflectionError.message);
+  }
+
+  const { data: sessionRow, error: sessionError } = await supabase
     .from("sessions")
     .select("last_intention, last_mode")
     .eq("user_id", userId)
     .limit(1)
     .maybeSingle();
+
+  if (sessionError) {
+    console.error("[Spirit] Supabase sessions error:", sessionError.message);
+  }
 
   return {
     lastIntention: sessionRow?.last_intention || null,
@@ -198,7 +206,7 @@ async function storeReflectionAndSession({ userId, prompt, mode, reply }) {
 
   const now = new Date().toISOString();
 
-  await supabase.from("reflections").insert({
+  const { error: insertError } = await supabase.from("reflections").insert({
     user_id: userId,
     intention: prompt,
     mode,
@@ -206,7 +214,11 @@ async function storeReflectionAndSession({ userId, prompt, mode, reply }) {
     created_at: now,
   });
 
-  await supabase
+  if (insertError) {
+    console.error("[Spirit] Error inserting reflection:", insertError.message);
+  }
+
+  const { error: upsertError } = await supabase
     .from("sessions")
     .upsert(
       {
@@ -217,6 +229,10 @@ async function storeReflectionAndSession({ userId, prompt, mode, reply }) {
       },
       { onConflict: "user_id" }
     );
+
+  if (upsertError) {
+    console.error("[Spirit] Error upserting session:", upsertError.message);
+  }
 }
 
 // ─────────────────────────────────────────────
@@ -247,13 +263,13 @@ router.post("/", async (req, res) => {
     });
 
     const completion = await client.chat.completions.create({
-      model: process.env.SPIRIT_MODEL || "gpt-4o-mini",
+      model: MODEL,
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: text },
       ],
-      temperature: 0.6,
-      max_tokens: 400,
+      temperature: TEMPERATURE,
+      max_tokens: MAX_TOKENS,
     });
 
     const reply =
@@ -283,7 +299,6 @@ router.post("/", async (req, res) => {
     return res.status(500).json({
       ok: false,
       error: "Spirit encountered an error while processing this request.",
-      details: err.message,
     });
   }
 });
