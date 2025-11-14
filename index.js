@@ -1,86 +1,79 @@
-// index.js — Spirit v4.x Core Server (with rate limiting)
-// -------------------------------------------------------
+// index.js — Spirit v4.x Entrypoint
+// ---------------------------------
 import "dotenv/config";
 import express from "express";
-import cors from "cors";
 import rateLimit from "express-rate-limit";
+import cors from "cors";
 
 import healthRouter from "./routes/health.js";
 import chatRouter from "./routes/chat.js";
 
 const app = express();
 
-// ─────────────────────────────────────────────
-//  CORS — only your apps + localhost
-// ─────────────────────────────────────────────
+// ---------------------------------------------
+// CORS — Finalized Patch (Lovable-proof)
+// ---------------------------------------------
 const allowedOrigins = [
   "http://localhost:3000",
-  "http://localhost:4173",
-  "https://spirit-ai-coach-creator.lovable.app",
-  "https://spirit-whisperer-ui.lovable.app",
-  "https://spirit-symbiosis-web.lovable.app",
   /\.lovable\.app$/,
+  /\.lovableproject\.com$/,
 ];
 
 app.use(
   cors({
-    origin: (origin, callback) => {
+    origin: function (origin, callback) {
       if (!origin) return callback(null, true);
 
-      const allowed = allowedOrigins.some((o) =>
-        o instanceof RegExp ? o.test(origin) : o === origin
+      const allowed = allowedOrigins.some((rule) =>
+        rule instanceof RegExp ? rule.test(origin) : rule === origin
       );
 
       if (allowed) return callback(null, true);
 
-      console.warn("[CORS] Blocked origin:", origin);
+      console.log("[CORS] Blocked origin:", origin);
       return callback(new Error("Not allowed by CORS"));
     },
-    methods: ["GET", "POST"],
-    allowedHeaders: ["Content-Type", "Authorization"],
+    credentials: false,
   })
 );
 
-// ─────────────────────────────────────────────
-//  JSON Parsing
-// ─────────────────────────────────────────────
+// ---------------------------------------------
+// Rate Limiting — Protect API From Abuse
+// ---------------------------------------------
+const limiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 50,
+});
+app.use(limiter);
+
+// ---------------------------------------------
+// Middleware
+// ---------------------------------------------
 app.use(express.json());
 
-// ─────────────────────────────────────────────
-//  Rate Limiting — Protect /chat
-// ─────────────────────────────────────────────
-const chatLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 20,
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-
-// ─────────────────────────────────────────────
-//  Routes
-// ─────────────────────────────────────────────
+// ---------------------------------------------
+// Routes
+// ---------------------------------------------
 app.use("/health", healthRouter);
-app.use("/chat", chatLimiter, chatRouter);
+app.use("/chat", chatRouter);
 
-// ─────────────────────────────────────────────
-//  Root Route (Sanity)
-// ─────────────────────────────────────────────
+// Root confirmation route
 app.get("/", (_req, res) => {
-  res.status(200).json({
+  res.json({
     ok: true,
     service: "Spirit v4.x",
-    message: "You have arrived. Breathe. We begin.",
+    msg: "You have arrived. Breathe. We begin.",
     ts: new Date().toISOString(),
   });
 });
 
-// ─────────────────────────────────────────────
-//  Start Server
-// ─────────────────────────────────────────────
-const PORT = process.env.PORT || 3000;
-
+// ---------------------------------------------
+// Start Server
+// ---------------------------------------------
+const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log(`🜂 Spirit v4.x listening on port ${PORT}`);
 });
 
 export default app;
+    
