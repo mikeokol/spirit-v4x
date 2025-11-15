@@ -5,6 +5,7 @@ import express from "express";
 import rateLimit from "express-rate-limit";
 import cors from "cors";
 
+import liveRouter from "./routes/live.js";
 import healthRouter from "./routes/health.js";
 import chatRouter from "./routes/chat.js";
 
@@ -56,6 +57,7 @@ app.use(express.json());
 // ---------------------------------------------
 app.use("/health", healthRouter);
 app.use("/chat", chatRouter);
+app.use("/live", liveRouter);
 
 // Root confirmation route
 app.get("/", (_req, res) => {
