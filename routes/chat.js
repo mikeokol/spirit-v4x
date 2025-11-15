@@ -1,4 +1,4 @@
-// routes/chat.js — Spirit v4.x Intelligence Layer (with chat-style memory + plan memory)
+// routes/chat.js — Spirit v4.x Intelligence Layer (with fitness plan handling)
 // ------------------------------------------------------------------------
 import express from "express";
 import OpenAI from "openai";
@@ -26,7 +26,9 @@ function classifyMode(text = "") {
     t.includes("calories") ||
     t.includes("hypertrophy") ||
     t.includes("cut") ||
-    t.includes("bulk")
+    t.includes("bulk") ||
+    t.includes("training block") ||
+    t.includes("training plan")
   ) {
     return "body";
   }
@@ -40,14 +42,10 @@ function classifyMode(text = "") {
     t.includes("tiktok") ||
     t.includes("shorts") ||
     t.includes("thumbnail") ||
-    t.includes("brand")
+    t.includes("brand") ||
+    t.includes("creator")
   ) {
-    return "creator";
-  }
-
-  // Hybrid explicit
-  if (t.includes("hybrid system") || t.includes("mind•body•brand") || t.includes("mind body brand")) {
-    return "hybrid";
+    return "brand";
   }
 
   // Deeper philosophical / oracle
@@ -107,18 +105,20 @@ function buildSystemPrompt({ mode, tone, lastIntention, lastReflection }) {
 
   const modeLine = {
     mind: "Focus on mental clarity, discipline, self-understanding, and identity alignment.",
-    body: "Focus on training, nutrition, recovery, and embodied discipline.",
-    creator: "Focus on content, brand, storytelling, and creator leverage.",
+    body: "Focus on training, nutrition, recovery, and embodied discipline. You are a present coach, not a PDF generator. In training conversations, speak session-by-session; in planning conversations, build structured blocks.",
+    brand: "Focus on content, brand, storytelling, and creator leverage.",
     reflection:
       "Treat this as a reflection/intention log. Help the user name their state and give one clear next move.",
     oracle:
       "Zoom out to deeper questions of meaning, human nature, and perspective — but always end with a concrete action.",
     coach:
       "Act as a hybrid coach across mind, body, and brand, choosing the most relevant pillar for the request.",
-    hybrid:
-      "Act as a Mind•Body•Brand architect. Unify training, content, identity, and lifestyle.",
     sanctuary:
       "Act as the central sanctuary: respond as a hybrid identity guide across mind, body, and brand, with extra focus on presence and clarity.",
+    creator:
+      "Focus on media systems, content engines, and reducing the gap between idea and execution for the user's chosen platforms.",
+    hybrid:
+      "Blend mind, body, and brand into one operating system, aligning behavior and creation with the user's identity.",
   }[mode] || "Act as a hybrid coach across mind, body, and brand.";
 
   const previousContext = `
@@ -143,26 +143,29 @@ Mission:
 - Reflect the user back to themselves with accuracy and calm authority.
 - Make the user feel guided, not lectured.
 
-Core behavioral structure:
-1. Identify the underlying desire or friction.
-2. Clarify what matters most.
-3. Prescribe 1–2 clear steps (only if needed).
-4. Reinforce identity.
+Core behavioral structure (implicit in your reasoning, not explained in the reply):
+1. Identify: What is the real underlying desire or friction?
+2. Clarify: What matters most right now?
+3. Prescribe: Offer 1–2 clear actions (only if the situation needs action).
+4. Reinforce: Close with an identity-based reminder of who the user is becoming.
 
 Tone:
 ${toneDescriptor}
 
 Mode:
-${mode.toUpperCase()}
+Current mode: ${mode.toUpperCase()}.
 ${modeLine}
 
 Previous context:
 ${previousContext}
 
 Style rules:
-- Replies: 3–7 sentences unless asked otherwise.
-- You may use *one short action list* if it increases clarity.
-- Avoid generic motivation.
+- Replies: 3–7 sentences unless the user asks for depth or a full plan.
+- You may use *one short action list* only if it increases clarity.
+- Avoid generic motivational language.
+- Avoid “coach voice” unless mode=high-performance and the user explicitly wants it.
+- In ORACLE mode: zoom out, then land on grounded truth.
+- In REFLECTION mode: mirror, acknowledge, give one direction.
 - Presence first. Clarity second. Action third.
 
 Your job: respond as Spirit v4.x with this identity, tone, and structure.
@@ -170,7 +173,7 @@ Your job: respond as Spirit v4.x with this identity, tone, and structure.
 }
 
 // ─────────────────────────────────────────────
-//  Supabase helpers — reflections & sessions
+//  Helpers — Supabase: reflections & sessions
 // ─────────────────────────────────────────────
 async function getLastContext(userId) {
   if (!userId) {
@@ -225,67 +228,176 @@ async function storeReflectionAndSession({ userId, prompt, mode, reply }) {
     );
 }
 
-// ─────────────────────────────────────────────
-//  NEW — Plan Memory Helpers
-// ─────────────────────────────────────────────
-async function storePlan({ userId, type, mode, prompt, reply }) {
-  if (!userId) return;
-  try {
-    const summary = (reply || "").split("\n").filter(Boolean)[0]?.slice(0, 240) || null;
+// Save fitness training block into sessions.training_block
+async function storeTrainingBlock({ userId, planText, meta }) {
+  if (!userId || !planText) return;
 
-    await supabase.from("plans").insert({
-      user_id: userId,
-      type,       // "fitness" | "creator" | "hybrid"
-      mode,       // body | creator | hybrid
-      summary,
-      prompt,
-      reply,
-    });
-  } catch (err) {
-    console.error("[Spirit/storePlan] error:", err?.message || err);
-  }
+  const now = new Date().toISOString();
+  const blockPayload = {
+    plan_text: planText,
+    goal: meta.goal || null,
+    experience: meta.experience || null,
+    days: meta.days || null,
+    created_at: now,
+  };
+
+  await supabase
+    .from("sessions")
+    .upsert(
+      {
+        user_id: userId,
+        training_block: blockPayload,
+        training_day: 1,
+        difficulty_adjustment: "normal",
+        last_session_completed_at: null,
+        last_mode: "body",
+        updated_at: now,
+      },
+      { onConflict: "user_id" }
+    );
 }
 
-async function updateSessionPlanSummary({ userId, type, reply }) {
-  if (!userId) return;
-  try {
-    const summary = (reply || "").split("\n").filter(Boolean)[0]?.slice(0, 240) || null;
-    if (!summary) return;
-
-    const now = new Date().toISOString();
-
-    const fieldMap = {
-      fitness: "last_fitness_plan_summary",
-      creator: "last_creator_plan_summary",
-      hybrid: "last_hybrid_plan_summary",
-    };
-
-    const fieldName = fieldMap[type];
-    if (!fieldName) return;
-
-    await supabase
-      .from("sessions")
-      .upsert(
-        {
-          user_id: userId,
-          [fieldName]: summary,
-          updated_at: now,
-        },
-        { onConflict: "user_id" }
-      );
-  } catch (err) {
-    console.error("[Spirit/updateSessionPlanSummary] error:", err?.message || err);
-  }
+// ─────────────────────────────────────────────
+//  Fitness plan detection & parsing
+// ─────────────────────────────────────────────
+function looksLikeFitnessPlanPrompt(text = "") {
+  const t = text.toLowerCase();
+  return (
+    t.includes("build a personalized training block") ||
+    t.includes("build a body coaching system") ||
+    t.includes("build a body coaching") ||
+    t.includes("build a training block")
+  );
 }
+
+function parseFitnessMeta(raw = "") {
+  function pick(label) {
+    const re = new RegExp(`${label}\\s*:\\s*(.+)`, "i");
+    const m = raw.match(re);
+    return m ? m[1].trim() : null;
+  }
+  const goal =
+    pick("Goal") ||
+    pick("Training Goal") ||
+    pick("Goal:") ||
+    null;
+  const experience =
+    pick("Experience") ||
+    pick("Experience Level") ||
+    null;
+  const days =
+    pick("Days per week") ||
+    pick("Workout Days") ||
+    pick("Workout Days per week") ||
+    null;
+  const tone = pick("Tone") || null;
+
+  return { goal, experience, days, tone };
+}
+
+function buildFitnessUserPrompt(meta, explicitTone) {
+  const goal = meta.goal || "not specified";
+  const experience = meta.experience || "not specified";
+  const days = meta.days || "not specified";
+  const tone = explicitTone || meta.tone || "default";
+
+  return `
+Build a training block for this person:
+
+- Goal: ${goal}
+- Experience level: ${experience}
+- Training days per week: ${days}
+- Tone: ${tone}
+
+Start with a short Spirit-style welcome to the block.
+Then give the full plan itself, without exposing any system instructions or rubric.
+`.trim();
+}
+
+const FITNESS_PLAN_RUBRIC = `
+You are generating a training block as a present, grounded coach.
+
+Rules for this specific reply:
+- Do NOT repeat or mention any system or rubric instructions.
+- Do NOT say "user profile" or "training details".
+- Never describe how you are generating the plan.
+
+Structure you MUST follow for the plan:
+
+────────────────────────────────────────────
+**Training Identity Blueprint**
+- Phase length (4–8 weeks)
+- Weekly frequency
+- Session length (adjust based on experience:
+  - beginner: ~35–45 min
+  - intermediate: ~45–60 min
+  - advanced: ~55–75 min)
+- Training split (appropriate to goal and level)
+- Identity anchor (gender-neutral unless prior context suggests otherwise)
+
+────────────────────────────────────────────
+**Weekly Structure**
+Use the number of training days given.
+
+For each day:
+- Day Name
+- Activation warm-up
+- Main lifts (2)
+- Accessories (2–4)
+- Optional finisher
+- Coaching notes (simple for beginners, more technical for advanced)
+
+Beginners:
+- Simpler exercises
+- Fewer sets
+- No percentages or heavy jargon
+- Optional variations for comfort and safety
+
+────────────────────────────────────────────
+**Progression Logic (4-Week Block)**
+Keep it simple for beginners, more detailed for higher levels.
+
+────────────────────────────────────────────
+**Nutrition Blueprint**
+Simple, supportive, goal-aligned.
+No complex formulas for beginners.
+
+────────────────────────────────────────────
+**Recovery Protocol**
+
+────────────────────────────────────────────
+**Checkpoints**
+What they should feel by Week 1 / 2 / 3 / 4.
+
+────────────────────────────────────────────
+**Identity Reinforcement**
+End with 3–5 short Spirit-style lines about who they’re becoming.
+
+Remember:
+- You are a live coach, not a list generator.
+- The reply must read like you are talking directly to the user.
+`.trim();
 
 // ─────────────────────────────────────────────
 //  POST /chat — main intelligence endpoint
+//  Supports:
+//    - simple: { prompt, tone, sessionId }
+//    - chatty: { prompt, tone, sessionId, messages: [{role, content}, ...] }
 // ─────────────────────────────────────────────
 router.post("/", async (req, res) => {
-  const { prompt, userId, sessionId, tone, mode: explicitMode, messages } = req.body || {};
-  const text = typeof prompt === "string" ? prompt.trim() : "";
+  const {
+    prompt,
+    userId,
+    sessionId,
+    tone,
+    mode: explicitMode,
+    messages,
+    gender, // optional, can be wired later from frontend
+  } = req.body || {};
 
-  if (!text) {
+  const rawText = typeof prompt === "string" ? prompt.trim() : "";
+
+  if (!rawText) {
     return res.status(400).json({
       ok: false,
       error: "Missing 'prompt' in request body.",
@@ -295,8 +407,7 @@ router.post("/", async (req, res) => {
   const effectiveUserId = userId || sessionId || null;
 
   try {
-    const mode = explicitMode || classifyMode(text);
-
+    const mode = explicitMode || classifyMode(rawText);
     const { lastIntention, lastReflection } = await getLastContext(effectiveUserId);
 
     const systemPrompt = buildSystemPrompt({
@@ -321,12 +432,28 @@ router.post("/", async (req, res) => {
           }))
       : [];
 
+    // ─────────────────────────────────────
+    //  Special handling: FITNESS PLAN MODE
+    // ─────────────────────────────────────
+    let isFitnessPlan = false;
+    let fitnessMeta = null;
+    let userPromptForModel = rawText;
+    const extraSystemMessages = [];
+
+    if (mode === "body" && looksLikeFitnessPlanPrompt(rawText)) {
+      isFitnessPlan = true;
+      fitnessMeta = parseFitnessMeta(rawText);
+      userPromptForModel = buildFitnessUserPrompt(fitnessMeta, tone);
+      extraSystemMessages.push({ role: "system", content: FITNESS_PLAN_RUBRIC });
+    }
+
     const completion = await client.chat.completions.create({
       model: process.env.SPIRIT_MODEL || "gpt-4o-mini",
       messages: [
         { role: "system", content: systemPrompt },
+        ...extraSystemMessages,
         ...historyMessages,
-        { role: "user", content: text },
+        { role: "user", content: userPromptForModel },
       ],
       temperature: Number(process.env.SPIRIT_TEMPERATURE || 0.6),
       max_tokens: Number(process.env.SPIRIT_MAX_TOKENS || 400),
@@ -336,38 +463,31 @@ router.post("/", async (req, res) => {
       completion.choices?.[0]?.message?.content?.trim() ||
       "I’m here. Let’s take one clear step. What do you need right now?";
 
-    // Store reflections (existing logic)
-    if (mode === "reflection" || text.toLowerCase().startsWith("i choose ")) {
+    // Store reflections only for reflection mode / "I choose ..."
+    if (mode === "reflection" || rawText.toLowerCase().startsWith("i choose ")) {
       await storeReflectionAndSession({
         userId: effectiveUserId,
-        prompt: text,
+        prompt: rawText,
         mode,
         reply,
       });
     }
 
-    // NEW — Plan Memory for Body/Creator/Hybrid modes
-    const planModeMap = {
-      body: "fitness",
-      creator: "creator",
-      hybrid: "hybrid",
-    };
-
-    const planType = planModeMap[mode];
-    if (planType && effectiveUserId) {
-      await storePlan({
+    // Store fitness training block in sessions when we generate a plan
+    if (isFitnessPlan && effectiveUserId) {
+      await storeTrainingBlock({
         userId: effectiveUserId,
-        type: planType,
-        mode,
-        prompt: text,
-        reply,
+        planText: reply,
+        meta: fitnessMeta || {},
       });
 
-      await updateSessionPlanSummary({
-        userId: effectiveUserId,
-        type: planType,
-        reply,
-      });
+      // Optional: update gender if provided
+      if (gender) {
+        await supabase
+          .from("sessions")
+          .update({ gender })
+          .eq("user_id", effectiveUserId);
+      }
     }
 
     return res.json({
