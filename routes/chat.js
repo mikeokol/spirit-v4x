@@ -1,4 +1,4 @@
-// routes/chat.js — Spirit v4.x Intelligence Layer (with chat-style memory)
+// routes/chat.js — Spirit v4.x Intelligence Layer (with chat-style memory + plan memory)
 // ------------------------------------------------------------------------
 import express from "express";
 import OpenAI from "openai";
@@ -42,7 +42,12 @@ function classifyMode(text = "") {
     t.includes("thumbnail") ||
     t.includes("brand")
   ) {
-    return "brand";
+    return "creator";
+  }
+
+  // Hybrid explicit
+  if (t.includes("hybrid system") || t.includes("mind•body•brand") || t.includes("mind body brand")) {
+    return "hybrid";
   }
 
   // Deeper philosophical / oracle
@@ -103,13 +108,15 @@ function buildSystemPrompt({ mode, tone, lastIntention, lastReflection }) {
   const modeLine = {
     mind: "Focus on mental clarity, discipline, self-understanding, and identity alignment.",
     body: "Focus on training, nutrition, recovery, and embodied discipline.",
-    brand: "Focus on content, brand, storytelling, and creator leverage.",
+    creator: "Focus on content, brand, storytelling, and creator leverage.",
     reflection:
       "Treat this as a reflection/intention log. Help the user name their state and give one clear next move.",
     oracle:
       "Zoom out to deeper questions of meaning, human nature, and perspective — but always end with a concrete action.",
     coach:
       "Act as a hybrid coach across mind, body, and brand, choosing the most relevant pillar for the request.",
+    hybrid:
+      "Act as a Mind•Body•Brand architect. Unify training, content, identity, and lifestyle.",
     sanctuary:
       "Act as the central sanctuary: respond as a hybrid identity guide across mind, body, and brand, with extra focus on presence and clarity.",
   }[mode] || "Act as a hybrid coach across mind, body, and brand.";
@@ -136,29 +143,26 @@ Mission:
 - Reflect the user back to themselves with accuracy and calm authority.
 - Make the user feel guided, not lectured.
 
-Core behavioral structure (implicit in your reasoning, not explained in the reply):
-1. Identify: What is the real underlying desire or friction?
-2. Clarify: What matters most right now?
-3. Prescribe: Offer 1–2 clear actions (only if the situation needs action).
-4. Reinforce: Close with an identity-based reminder of who the user is becoming.
+Core behavioral structure:
+1. Identify the underlying desire or friction.
+2. Clarify what matters most.
+3. Prescribe 1–2 clear steps (only if needed).
+4. Reinforce identity.
 
 Tone:
 ${toneDescriptor}
 
 Mode:
-Current mode: ${mode.toUpperCase()}.
+${mode.toUpperCase()}
 ${modeLine}
 
 Previous context:
 ${previousContext}
 
 Style rules:
-- Replies: 3–7 sentences unless the user asks for depth.
-- You may use *one short action list* only if it increases clarity.
-- Avoid generic motivational language.
-- Avoid “coach voice” unless mode=high-performance and the user explicitly wants it.
-- In ORACLE mode: zoom out, then land on grounded truth.
-- In REFLECTION mode: mirror, acknowledge, give one direction.
+- Replies: 3–7 sentences unless asked otherwise.
+- You may use *one short action list* if it increases clarity.
+- Avoid generic motivation.
 - Presence first. Clarity second. Action third.
 
 Your job: respond as Spirit v4.x with this identity, tone, and structure.
@@ -222,10 +226,60 @@ async function storeReflectionAndSession({ userId, prompt, mode, reply }) {
 }
 
 // ─────────────────────────────────────────────
+//  NEW — Plan Memory Helpers
+// ─────────────────────────────────────────────
+async function storePlan({ userId, type, mode, prompt, reply }) {
+  if (!userId) return;
+  try {
+    const summary = (reply || "").split("\n").filter(Boolean)[0]?.slice(0, 240) || null;
+
+    await supabase.from("plans").insert({
+      user_id: userId,
+      type,       // "fitness" | "creator" | "hybrid"
+      mode,       // body | creator | hybrid
+      summary,
+      prompt,
+      reply,
+    });
+  } catch (err) {
+    console.error("[Spirit/storePlan] error:", err?.message || err);
+  }
+}
+
+async function updateSessionPlanSummary({ userId, type, reply }) {
+  if (!userId) return;
+  try {
+    const summary = (reply || "").split("\n").filter(Boolean)[0]?.slice(0, 240) || null;
+    if (!summary) return;
+
+    const now = new Date().toISOString();
+
+    const fieldMap = {
+      fitness: "last_fitness_plan_summary",
+      creator: "last_creator_plan_summary",
+      hybrid: "last_hybrid_plan_summary",
+    };
+
+    const fieldName = fieldMap[type];
+    if (!fieldName) return;
+
+    await supabase
+      .from("sessions")
+      .upsert(
+        {
+          user_id: userId,
+          [fieldName]: summary,
+          updated_at: now,
+        },
+        { onConflict: "user_id" }
+      );
+  } catch (err) {
+    console.error("[Spirit/updateSessionPlanSummary] error:", err?.message || err);
+  }
+}
+
+// ─────────────────────────────────────────────
 //  POST /chat — main intelligence endpoint
-//  Supports:
-//    - simple: { prompt, tone, sessionId }
-//    - chatty: { prompt, tone, sessionId, messages: [{role, content}, ...] }
 // ─────────────────────────────────────────────
 router.post("/", async (req, res) => {
   const { prompt, userId, sessionId, tone, mode: explicitMode, messages } = req.body || {};
@@ -282,12 +336,36 @@ router.post("/", async (req, res) => {
       completion.choices?.[0]?.message?.content?.trim() ||
       "I’m here. Let’s take one clear step. What do you need right now?";
 
-    // Store reflections only for reflection mode / "I choose ..."
+    // Store reflections (existing logic)
     if (mode === "reflection" || text.toLowerCase().startsWith("i choose ")) {
       await storeReflectionAndSession({
         userId: effectiveUserId,
         prompt: text,
         mode,
+        reply,
+      });
+    }
+
+    // NEW — Plan Memory for Body/Creator/Hybrid modes
+    const planModeMap = {
+      body: "fitness",
+      creator: "creator",
+      hybrid: "hybrid",
+    };
+
+    const planType = planModeMap[mode];
+    if (planType && effectiveUserId) {
+      await storePlan({
+        userId: effectiveUserId,
+        type: planType,
+        mode,
+        prompt: text,
+        reply,
+      });
+
+      await updateSessionPlanSummary({
+        userId: effectiveUserId,
+        type: planType,
         reply,
       });
     }
