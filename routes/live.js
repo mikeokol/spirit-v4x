@@ -27,15 +27,19 @@ async function completeDay({ userId, day, difficulty }) {
   const now = new Date().toISOString();
 
   // Increment training_day (simple v1 logic)
-  const { data: current } = await supabase
+  const { data: current, error: currentError } = await supabase
     .from("sessions")
     .select("training_day")
     .eq("user_id", userId)
     .maybeSingle();
 
+  if (currentError) {
+    console.warn("[live/completeDay] could not read training_day:", currentError.message);
+  }
+
   const nextDay = (current?.training_day || 1) + 1;
 
-  await supabase
+  const { error: updateError } = await supabase
     .from("sessions")
     .update({
       training_day: nextDay,
@@ -45,27 +49,46 @@ async function completeDay({ userId, day, difficulty }) {
     })
     .eq("user_id", userId);
 
+  if (updateError) {
+    console.warn("[live/completeDay] update error:", updateError.message);
+  }
+
   // Also log into training_history (if table exists)
   try {
-    await supabase.from("training_history").insert({
+    const { error: historyError } = await supabase.from("training_history").insert({
       user_id: userId,
       session_day: day,
       block_week: null,
       perceived_difficulty: difficulty || "normal",
       notes: null,
     });
+    if (historyError) {
+      console.warn("[live/completeDay] training_history insert failed:", historyError.message);
+    }
   } catch (err) {
-    console.warn("[live/completeDay] training_history insert failed:", err.message);
+    console.warn("[live/completeDay] training_history insert failed (exception):", err.message);
   }
 }
 
-// Small helper to extract today's structured workout (if present)
+// Small helper to normalize workouts + extract today's structured workout (if present)
 function getTodaysWorkout(trainingBlock, effectiveDay) {
   if (!trainingBlock) return { todaysWorkout: null, workouts: [] };
 
-  const workouts = Array.isArray(trainingBlock.workouts)
-    ? trainingBlock.workouts
-    : [];
+  let workouts = [];
+
+  // trainingBlock.workouts might be array or something else
+  if (Array.isArray(trainingBlock.workouts)) {
+    workouts = trainingBlock.workouts;
+  } else if (trainingBlock.workouts && typeof trainingBlock.workouts === "string") {
+    try {
+      const parsed = JSON.parse(trainingBlock.workouts);
+      if (Array.isArray(parsed)) {
+        workouts = parsed;
+      }
+    } catch (err) {
+      console.warn("[live/getTodaysWorkout] failed to parse workouts string:", err.message);
+    }
+  }
 
   const todaysWorkout =
     workouts.find((w) => Number(w.day) === Number(effectiveDay)) || null;
@@ -98,7 +121,7 @@ router.post("/start", async (req, res) => {
   const goal = trainingBlock.goal || "not specified";
   const experience = trainingBlock.experience || "not specified";
   const days = trainingBlock.days || "not specified";
-  const gender = session.gender || "unspecified";
+  const gender = session.gender || trainingBlock.gender || "unspecified";
 
   const effectiveDay = day || session.training_day || 1;
   const { todaysWorkout } = getTodaysWorkout(trainingBlock, effectiveDay);
@@ -112,7 +135,7 @@ You already have the user's full training block and (ideally) a structured worko
 Your job in this message:
 - Welcome the user to today's session
 - Briefly remind them of today's focus
-- Summarize ONLY the exercises for Day ${effectiveDay}
+- Summarize ONLY the exercises for Day ${effectiveDay}, if they exist
 - Keep it beginner-friendly if experience is beginner
 - Tone: grounded, encouraging, identity-focused
 - Keep it under ~10 sentences.
@@ -193,7 +216,7 @@ router.post("/coach", async (req, res) => {
   const planText = trainingBlock.plan_text || "";
   const goal = trainingBlock.goal || "not specified";
   const experience = trainingBlock.experience || "not specified";
-  const gender = session.gender || "unspecified";
+  const gender = session.gender || trainingBlock.gender || "unspecified";
   const effectiveDay = day || session.training_day || 1;
 
   const { todaysWorkout } = getTodaysWorkout(trainingBlock, effectiveDay);
@@ -202,7 +225,7 @@ router.post("/coach", async (req, res) => {
 You are Spirit v4.x — a live fitness coach.
 
 You are in the middle of a workout session.
-You already know today's planned exercises.
+You already know today's planned exercises (if structured data exists).
 
 Respond to the user's message with:
 - short guidance (1–4 sentences)
