@@ -236,6 +236,7 @@ async function storeTrainingBlock({ userId, planText, meta, gender, workouts }) 
   const blockPayload = {
     plan_text: planText,
     goal: meta.goal || null,
+    specific_goal: meta.specificGoal || null, // ⭐ NEW: specific focus from FitnessMode
     experience: meta.experience || null,
     days: meta.days || null,
     gender: gender || "unspecified",
@@ -278,35 +279,57 @@ function parseFitnessMeta(raw = "") {
     const m = raw.match(re);
     return m ? m[1].trim() : null;
   }
+
   const goal =
     pick("Goal") ||
     pick("Training Goal") ||
-    pick("Goal:") ||
     null;
+
   const experience =
     pick("Experience") ||
     pick("Experience Level") ||
     null;
+
   const days =
     pick("Days per week") ||
     pick("Workout Days") ||
     pick("Workout Days per week") ||
     null;
+
   const tone = pick("Tone") || null;
 
-  return { goal, experience, days, tone };
+  // ⭐ NEW: capture the specific sub-goal / focus
+  const specificGoal =
+    pick("Specific Goal / Focus") ||
+    pick("Specific Goal") ||
+    pick("Goal Detail") ||
+    pick("Specific Focus") ||
+    null;
+
+  return { goal, experience, days, tone, specificGoal };
 }
 
 function buildFitnessUserPrompt(meta, explicitTone) {
   const goal = meta.goal || "not specified";
+  const specificGoal = meta.specificGoal || "not specified";
   const experience = meta.experience || "not specified";
   const days = meta.days || "not specified";
   const tone = explicitTone || meta.tone || "default";
 
   return `
-Build a training block for this person:
+Build a training block for this person.
 
-- Goal: ${goal}
+Use BOTH the primary Training Goal and the Specific Goal / Focus when designing:
+- exercise selection
+- set/rep schemes
+- rest times
+- intensity
+- overall weekly structure
+- injury risk management (especially for beginners).
+
+User Profile:
+- Training Goal: ${goal}
+- Specific Goal / Focus: ${specificGoal}
 - Experience level: ${experience}
 - Training days per week: ${days}
 - Tone: ${tone}
@@ -572,7 +595,7 @@ Keep it practical and identity-based.
 
     // ─────────────────────────────
     //  Generic path (Sanctuary, Mind, Body, Oracle, Coach)
-// ─────────────────────────────
+    // ─────────────────────────────
     const { lastIntention, lastReflection } = await getLastContext(effectiveUserId);
 
     const systemPrompt = buildSystemPrompt({
