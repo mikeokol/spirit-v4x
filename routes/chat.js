@@ -28,7 +28,8 @@ function classifyMode(text = "") {
     t.includes("cut") ||
     t.includes("bulk") ||
     t.includes("training block") ||
-    t.includes("training plan")
+    t.includes("training plan") ||
+    t.includes("personalized training block")
   ) {
     return "body";
   }
@@ -90,13 +91,21 @@ function buildSystemPrompt({ mode, tone, lastIntention, lastReflection }) {
       toneDescriptor =
         "Use a high-performance, elite-athlete coach tone: direct, focused, no fluff.";
       break;
-    case "casual":
-      toneDescriptor =
-        "Use a relaxed, conversational tone, but still precise and actionable.";
-      break;
     case "founder":
       toneDescriptor =
         "Use a founder-to-founder tone: strategic, brutally honest, but encouraging.";
+      break;
+    case "zen-monk":
+      toneDescriptor =
+        "Use a slow, grounded, meditative tone. Short, calm sentences. Focus on breath, control, and quiet confidence.";
+      break;
+    case "drill-sergeant":
+      toneDescriptor =
+        "Use a sharp, demanding coaching tone. Direct commands, high intensity, but never abusive or demeaning. You push, but you still protect the user’s health.";
+      break;
+    case "casual":
+      toneDescriptor =
+        "Use a relaxed, conversational tone, but still precise and actionable.";
       break;
     default:
       toneDescriptor =
@@ -236,11 +245,13 @@ async function storeTrainingBlock({ userId, planText, meta, gender, workouts }) 
   const blockPayload = {
     plan_text: planText,
     goal: meta.goal || null,
-    specific_goal: meta.specificGoal || null, // ⭐ NEW: specific focus from FitnessMode
+    specific_goal: meta.specificGoal || null,
     experience: meta.experience || null,
-    days: meta.days || null,
-    gender: gender || "unspecified",
-    workouts: workouts || [],
+    days: meta.days ? Number(meta.days) || meta.days : null,
+    gender: gender || meta.gender || "unspecified",
+    weight: meta.weight || null,
+    height: meta.height || null,
+    workouts: Array.isArray(workouts) ? workouts : [],
     created_at: now,
   };
 
@@ -254,6 +265,7 @@ async function storeTrainingBlock({ userId, planText, meta, gender, workouts }) 
         difficulty_adjustment: "normal",
         last_session_completed_at: null,
         last_mode: "body",
+        gender: blockPayload.gender,
         updated_at: now,
       },
       { onConflict: "user_id" }
@@ -281,24 +293,25 @@ function parseFitnessMeta(raw = "") {
   }
 
   const goal =
-    pick("Goal") ||
     pick("Training Goal") ||
+    pick("Goal") ||
     null;
 
   const experience =
-    pick("Experience") ||
     pick("Experience Level") ||
+    pick("Experience") ||
     null;
 
   const days =
-    pick("Days per week") ||
-    pick("Workout Days") ||
     pick("Workout Days per week") ||
+    pick("Workout Days") ||
+    pick("Days per week") ||
     null;
 
-  const tone = pick("Tone") || null;
+  const tone =
+    pick("Tone") ||
+    null;
 
-  // ⭐ NEW: capture the specific sub-goal / focus
   const specificGoal =
     pick("Specific Goal / Focus") ||
     pick("Specific Goal") ||
@@ -306,7 +319,17 @@ function parseFitnessMeta(raw = "") {
     pick("Specific Focus") ||
     null;
 
-  return { goal, experience, days, tone, specificGoal };
+  const weight =
+    pick("User Weight") ||
+    pick("Weight") ||
+    null;
+
+  const height =
+    pick("User Height") ||
+    pick("Height") ||
+    null;
+
+  return { goal, experience, days, tone, specificGoal, weight, height };
 }
 
 function buildFitnessUserPrompt(meta, explicitTone) {
@@ -315,27 +338,25 @@ function buildFitnessUserPrompt(meta, explicitTone) {
   const experience = meta.experience || "not specified";
   const days = meta.days || "not specified";
   const tone = explicitTone || meta.tone || "default";
+  const gender = meta.gender || "unspecified";
+  const weight = meta.weight || null;
+  const height = meta.height || null;
 
   return `
-Build a training block for this person.
+Build a personalized training block that adapts to the user's level, identity, and lifestyle.
 
-Use BOTH the primary Training Goal and the Specific Goal / Focus when designing:
-- exercise selection
-- set/rep schemes
-- rest times
-- intensity
-- overall weekly structure
-- injury risk management (especially for beginners).
+Training goal category: ${goal}
+Specific goal or focus: ${specificGoal}
+Experience level: ${experience}
+Training days per week: ${days}
+Gender: ${gender}
+${weight ? `Approximate weight: ${weight}` : ""}
+${height ? `Approximate height: ${height}` : ""}
+Preferred coaching tone: ${tone}
 
-User Profile:
-- Training Goal: ${goal}
-- Specific Goal / Focus: ${specificGoal}
-- Experience level: ${experience}
-- Training days per week: ${days}
-- Tone: ${tone}
-
-Start with a short Spirit-style welcome to the block.
-Then give the full plan itself, without exposing any system instructions or rubric.
+Return ONLY the training plan text, with a short Spirit-style welcome at the top.
+Do NOT use markdown formatting (no "**", no "#", no bullet symbols like "-" or "*").
+Write in clear sections with labels and line breaks so it reads like a live coach speaking, not a checklist.
 `.trim();
 }
 
@@ -343,60 +364,48 @@ const FITNESS_PLAN_RUBRIC = `
 You are generating a training block as a present, grounded coach.
 
 Rules for this specific reply:
-- Do NOT repeat or mention any system or rubric instructions.
+- Do NOT use markdown formatting (no "**", no "#", no bullet symbols like "-" or "*").
 - Do NOT say "user profile" or "training details".
 - Never describe how you are generating the plan.
 
-Structure you MUST follow for the plan:
+Write in clean sections with clear labels and line breaks so it reads like a live coach speaking, not a checklist.
 
-────────────────────────────────────────────
-**Training Identity Blueprint**
+Structure you MUST follow for the plan, using plain text:
+
+TRAINING IDENTITY BLUEPRINT:
 - Phase length (4–8 weeks)
 - Weekly frequency
-- Session length (adjust based on experience:
-  - beginner: ~35–45 min
-  - intermediate: ~45–60 min
-  - advanced: ~55–75 min)
+- Typical session length (based on experience:
+  beginner ~35–45 min, intermediate ~45–60 min, advanced ~55–75 min)
 - Training split (appropriate to goal and level)
 - Identity anchor (gender-neutral unless prior context suggests otherwise)
 
-────────────────────────────────────────────
-**Weekly Structure**
-Use the number of training days given.
+WEEKLY STRUCTURE:
+For each training day, use this shape:
 
-For each day:
-- Day Name
-- Activation warm-up
-- Main lifts (2)
-- Accessories (2–4)
-- Optional finisher
-- Coaching notes (simple for beginners, more technical for advanced)
+DAY 1 — short title (e.g. "Upper Foundation Strength")
+Warm-up:
+Main work:
+Accessories:
+Optional finisher:
+Coaching notes:
 
-Beginners:
-- Simpler exercises
-- Fewer sets
-- No percentages or heavy jargon
-- Optional variations for comfort and safety
+Keep beginners simpler: fewer sets, simpler exercises, no complex jargon.
 
-────────────────────────────────────────────
-**Progression Logic (4-Week Block)**
-Keep it simple for beginners, more detailed for higher levels.
+PROGRESSION LOGIC (4-WEEK BLOCK):
+Explain how to progress week to week in simple language.
 
-────────────────────────────────────────────
-**Nutrition Blueprint**
-Simple, supportive, goal-aligned.
-No complex formulas for beginners.
+NUTRITION BLUEPRINT:
+Simple, supportive, aligned with the goal. No complex math, keep it practical.
 
-────────────────────────────────────────────
-**Recovery Protocol**
+RECOVERY PROTOCOL:
+Key habits and guardrails for sleep, rest, and mobility.
 
-────────────────────────────────────────────
-**Checkpoints**
-What they should feel by Week 1 / 2 / 3 / 4.
+CHECKPOINTS:
+Describe what they should notice by Week 1, Week 2, Week 3, Week 4.
 
-────────────────────────────────────────────
-**Identity Reinforcement**
-End with 3–5 short Spirit-style lines about who they’re becoming.
+IDENTITY REINFORCEMENT:
+End with 3–5 short lines about who they’re becoming through this block.
 
 Remember:
 - You are a live coach, not a list generator.
@@ -429,7 +438,7 @@ Format:
 `.trim();
 
   const userPrompt = `
-Convert this training plan into structured JSON workouts:
+Convert this training plan into structured JSON workouts, one object per day:
 
 ${planText}
 `.trim();
@@ -448,7 +457,16 @@ ${planText}
     const raw = completion.choices?.[0]?.message?.content?.trim() || "[]";
 
     try {
-      return JSON.parse(raw);
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed.map((w, idx) => ({
+          day: Number(w.day) || idx + 1,
+          title: w.title || `Day ${idx + 1}`,
+          focus: w.focus || "",
+          exercises: Array.isArray(w.exercises) ? w.exercises : [],
+        }));
+      }
+      return [];
     } catch (err) {
       console.warn("[extractWorkouts] JSON parse failed:", err.message);
       return [];
@@ -464,6 +482,7 @@ ${planText}
 //  Supports:
 //    - simple: { prompt, tone, sessionId }
 //    - chatty: { prompt, tone, sessionId, messages: [{role, content}, ...] }
+//    - fitness: { ... plus goalCategory, specificGoal, experience, days, weight, height, gender }
 // ─────────────────────────────────────────────
 router.post("/", async (req, res) => {
   const {
@@ -473,7 +492,13 @@ router.post("/", async (req, res) => {
     tone,
     mode: explicitMode,
     messages,
-    gender, // optional, can be wired from frontend
+    gender,         // optional, can be wired from frontend
+    goalCategory,   // new: main training goal from FitnessMode
+    specificGoal,   // new: second-level specific focus
+    experience: expFromBody, // new: experience level
+    days: daysFromBody,      // new: days per week
+    weight,
+    height,
   } = req.body || {};
 
   const rawText = typeof prompt === "string" ? prompt.trim() : "";
@@ -629,7 +654,23 @@ Keep it practical and identity-based.
 
     if (mode === "body" && looksLikeFitnessPlanPrompt(rawText)) {
       isFitnessPlan = true;
-      fitnessMeta = parseFitnessMeta(rawText);
+
+      // Parse from text first
+      const metaFromText = parseFitnessMeta(rawText);
+
+      // Merge with top-level JSON fields (JSON wins if present)
+      fitnessMeta = {
+        ...metaFromText,
+        goal: goalCategory || metaFromText.goal,
+        specificGoal: specificGoal || metaFromText.specificGoal,
+        experience: expFromBody || metaFromText.experience,
+        days: daysFromBody || metaFromText.days,
+        weight: weight || metaFromText.weight,
+        height: height || metaFromText.height,
+        gender: gender || null,
+        tone: tone || metaFromText.tone,
+      };
+
       userPromptForModel = buildFitnessUserPrompt(fitnessMeta, tone);
       extraSystemMessages.push({ role: "system", content: FITNESS_PLAN_RUBRIC });
     }
