@@ -1,4 +1,4 @@
-// routes/chat.js — Spirit v4.x Intelligence Layer (with fitness plan handling)
+// routes/chat.js — Spirit v4.x Intelligence Layer (with structured fitness plans)
 // ------------------------------------------------------------------------
 import express from "express";
 import OpenAI from "openai";
@@ -228,8 +228,8 @@ async function storeReflectionAndSession({ userId, prompt, mode, reply }) {
     );
 }
 
-// Save fitness training block into sessions.training_block
-async function storeTrainingBlock({ userId, planText, meta }) {
+// Save fitness training block into sessions.training_block (with workouts)
+async function storeTrainingBlock({ userId, planText, meta, gender, workouts }) {
   if (!userId || !planText) return;
 
   const now = new Date().toISOString();
@@ -238,6 +238,8 @@ async function storeTrainingBlock({ userId, planText, meta }) {
     goal: meta.goal || null,
     experience: meta.experience || null,
     days: meta.days || null,
+    gender: gender || "unspecified",
+    workouts: workouts || [],
     created_at: now,
   };
 
@@ -379,6 +381,62 @@ Remember:
 `.trim();
 
 // ─────────────────────────────────────────────
+//  Extract structured workouts from plan text
+// ─────────────────────────────────────────────
+async function extractWorkouts(planText) {
+  const systemPrompt = `
+You are Spirit v4.x.
+
+Convert the user's long training plan into a JSON array of daily structured workouts.
+
+Output ONLY valid JSON. No markdown, no commentary.
+
+Format:
+[
+  {
+    "day": 1,
+    "title": "Upper Foundation Strength",
+    "focus": "Technique and confidence",
+    "exercises": [
+      { "name": "Goblet Squat", "sets": "3", "reps": "8–10" },
+      { "name": "Push-Up", "sets": "3", "reps": "6–10" }
+    ]
+  }
+]
+`.trim();
+
+  const userPrompt = `
+Convert this training plan into structured JSON workouts:
+
+${planText}
+`.trim();
+
+  try {
+    const completion = await client.chat.completions.create({
+      model: process.env.SPIRIT_MODEL || "gpt-4o-mini",
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+      temperature: 0.2,
+      max_tokens: 700,
+    });
+
+    const raw = completion.choices?.[0]?.message?.content?.trim() || "[]";
+
+    try {
+      return JSON.parse(raw);
+    } catch (err) {
+      console.warn("[extractWorkouts] JSON parse failed:", err.message);
+      return [];
+    }
+  } catch (err) {
+    console.error("[extractWorkouts] error:", err.message);
+    return [];
+  }
+}
+
+// ─────────────────────────────────────────────
 //  POST /chat — main intelligence endpoint
 //  Supports:
 //    - simple: { prompt, tone, sessionId }
@@ -392,7 +450,7 @@ router.post("/", async (req, res) => {
     tone,
     mode: explicitMode,
     messages,
-    gender, // optional, can be wired later from frontend
+    gender, // optional, can be wired from frontend
   } = req.body || {};
 
   const rawText = typeof prompt === "string" ? prompt.trim() : "";
@@ -408,6 +466,113 @@ router.post("/", async (req, res) => {
 
   try {
     const mode = explicitMode || classifyMode(rawText);
+
+    // ─────────────────────────────
+    //  Special branch: CREATOR MODE
+    // ─────────────────────────────
+    if (mode === "creator") {
+      const systemPrompt = `
+You are Spirit v4.x — a media team, not a motivational coach.
+
+Your job:
+- Turn the user's niche + format into EXECUTABLE content
+- Propose specific video/post ideas
+- For each idea, give:
+  - Title
+  - What the video focuses on
+  - Suggested posting time window
+  - Hashtags (platform-appropriate)
+  - One sentence on WHY you recommend that idea
+
+Keep it:
+- clear
+- practical
+- ready to record
+No long motivational speeches. No therapy tone.
+`.trim();
+
+      const historyMessages = Array.isArray(messages)
+        ? messages
+            .filter(
+              (m) =>
+                m &&
+                typeof m.content === "string" &&
+                (m.role === "user" || m.role === "assistant")
+            )
+            .map((m) => ({
+              role: m.role,
+              content: m.content,
+            }))
+        : [];
+
+      const completion = await client.chat.completions.create({
+        model: process.env.SPIRIT_MODEL || "gpt-4o-mini",
+        messages: [
+          { role: "system", content: systemPrompt },
+          ...historyMessages,
+          { role: "user", content: rawText },
+        ],
+        temperature: Number(process.env.SPIRIT_TEMPERATURE || 0.7),
+        max_tokens: 900,
+      });
+
+      const reply =
+        completion.choices?.[0]?.message?.content?.trim() ||
+        "Here are some ideas to start creating.";
+
+      return res.json({
+        ok: true,
+        service: "Spirit v4.x",
+        mode,
+        tone: tone || "default",
+        reply,
+        ts: new Date().toISOString(),
+      });
+    }
+
+    // ─────────────────────────────
+    //  Special branch: HYBRID MODE
+    // ─────────────────────────────
+    if (mode === "hybrid") {
+      const systemPrompt = `
+You are Spirit v4.x — a hybrid Mind•Body•Brand coach.
+
+Blend:
+- training
+- mindset
+- content/brand
+
+into ONE coherent operating system for the user.
+Keep it practical and identity-based.
+`.trim();
+
+      const completion = await client.chat.completions.create({
+        model: process.env.SPIRIT_MODEL || "gpt-4o-mini",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: rawText },
+        ],
+        temperature: Number(process.env.SPIRIT_TEMPERATURE || 0.7),
+        max_tokens: 900,
+      });
+
+      const reply =
+        completion.choices?.[0]?.message?.content?.trim() ||
+        "Let’s align your mind, body, and brand into one clear system.";
+
+      return res.json({
+        ok: true,
+        service: "Spirit v4.x",
+        mode,
+        tone: tone || "default",
+        reply,
+        ts: new Date().toISOString(),
+      });
+    }
+
+    // ─────────────────────────────
+    //  Generic path (Sanctuary, Mind, Body, Oracle, Coach)
+// ─────────────────────────────
     const { lastIntention, lastReflection } = await getLastContext(effectiveUserId);
 
     const systemPrompt = buildSystemPrompt({
@@ -417,7 +582,6 @@ router.post("/", async (req, res) => {
       lastReflection,
     });
 
-    // Build chat-style history from frontend, if provided
     const historyMessages = Array.isArray(messages)
       ? messages
           .filter(
@@ -456,7 +620,7 @@ router.post("/", async (req, res) => {
         { role: "user", content: userPromptForModel },
       ],
       temperature: Number(process.env.SPIRIT_TEMPERATURE || 0.6),
-      max_tokens: Number(process.env.SPIRIT_MAX_TOKENS || 400),
+      max_tokens: Number(process.env.SPIRIT_MAX_TOKENS || 800),
     });
 
     const reply =
@@ -475,13 +639,17 @@ router.post("/", async (req, res) => {
 
     // Store fitness training block in sessions when we generate a plan
     if (isFitnessPlan && effectiveUserId) {
+      const workouts = await extractWorkouts(reply);
+
       await storeTrainingBlock({
         userId: effectiveUserId,
         planText: reply,
         meta: fitnessMeta || {},
+        gender: gender || "unspecified",
+        workouts,
       });
 
-      // Optional: update gender if provided
+      // Optional: update gender column separately
       if (gender) {
         await supabase
           .from("sessions")
