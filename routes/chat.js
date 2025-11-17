@@ -1,4 +1,4 @@
-// routes/chat.js — Spirit v4.x Intelligence Layer (with structured fitness plans)
+// routes/chat.js — Spirit Intelligence Layer (Phase 1 cleaned)
 // ------------------------------------------------------------------------
 import express from "express";
 import OpenAI from "openai";
@@ -78,57 +78,27 @@ function classifyMode(text = "") {
 }
 
 // ─────────────────────────────────────────────
-//  System prompt builder — Spirit v4.x brain
+//  System prompt builder — unified Founder-OS tone
 // ─────────────────────────────────────────────
-function buildSystemPrompt({ mode, tone, lastIntention, lastReflection }) {
-  let toneDescriptor = "";
-  switch (tone) {
-    case "mystical":
-      toneDescriptor =
-        "Use a calm, mystical, presence-first tone, like an oracle that respects time and clarity.";
-      break;
-    case "high-performance":
-      toneDescriptor =
-        "Use a high-performance, elite-athlete coach tone: direct, focused, no fluff.";
-      break;
-    case "founder":
-      toneDescriptor =
-        "Use a founder-to-founder tone: strategic, brutally honest, but encouraging.";
-      break;
-    case "zen-monk":
-      toneDescriptor =
-        "Use a slow, grounded, meditative tone. Short, calm sentences. Focus on breath, control, and quiet confidence.";
-      break;
-    case "drill-sergeant":
-      toneDescriptor =
-        "Use a sharp, demanding coaching tone. Direct commands, high intensity, but never abusive or demeaning. You push, but you still protect the user’s health.";
-      break;
-    case "casual":
-      toneDescriptor =
-        "Use a relaxed, conversational tone, but still precise and actionable.";
-      break;
-    default:
-      toneDescriptor =
-        "Use Spirit's default tone: mystical, disciplined, supportive, concise, and action-focused.";
-  }
-
-  const modeLine = {
-    mind: "Focus on mental clarity, discipline, self-understanding, and identity alignment.",
-    body: "Focus on training, nutrition, recovery, and embodied discipline. You are a present coach, not a PDF generator. In training conversations, speak session-by-session; in planning conversations, build structured blocks.",
-    brand: "Focus on content, brand, storytelling, and creator leverage.",
-    reflection:
-      "Treat this as a reflection/intention log. Help the user name their state and give one clear next move.",
-    oracle:
-      "Zoom out to deeper questions of meaning, human nature, and perspective — but always end with a concrete action.",
-    coach:
-      "Act as a hybrid coach across mind, body, and brand, choosing the most relevant pillar for the request.",
-    sanctuary:
-      "Act as the central sanctuary: respond as a hybrid identity guide across mind, body, and brand, with extra focus on presence and clarity.",
-    creator:
-      "Focus on media systems, content engines, and reducing the gap between idea and execution for the user's chosen platforms.",
-    hybrid:
-      "Blend mind, body, and brand into one operating system, aligning behavior and creation with the user's identity.",
-  }[mode] || "Act as a hybrid coach across mind, body, and brand.";
+function buildSystemPrompt({ mode, lastIntention, lastReflection }) {
+  const modeLine =
+    {
+      mind: "Focus on mental clarity, discipline, self-understanding, and identity alignment.",
+      body: "Focus on training, nutrition, recovery, and embodied discipline. You are a present coach, not a PDF generator. In training conversations, speak session-by-session; in planning conversations, build structured blocks.",
+      brand: "Focus on content, brand, storytelling, and creator leverage.",
+      reflection:
+        "Treat this as a reflection/intention log. Help the user name their state and give one clear next move.",
+      oracle:
+        "Zoom out to deeper questions of meaning, human nature, and perspective — but always end with a concrete action.",
+      coach:
+        "Act as a hybrid coach across mind, body, and brand, choosing the most relevant pillar for the request.",
+      sanctuary:
+        "Act as the central sanctuary: respond as a hybrid identity guide across mind, body, and brand, with extra focus on presence and clarity.",
+      creator:
+        "Focus on media systems, content engines, and reducing the gap between idea and execution for the user's chosen platforms.",
+      hybrid:
+        "Blend mind, body, and brand into one operating system, aligning behavior and creation with the user's identity.",
+    }[mode] || "Act as a hybrid coach across mind, body, and brand.";
 
   const previousContext = `
 Previous intention: ${lastIntention || "none recorded"}
@@ -136,15 +106,15 @@ Previous reflection: ${lastReflection || "none recorded"}
 `.trim();
 
   return `
-You are Spirit v4.x — a hybrid Mind•Body•Brand intelligence designed to bring clarity, discipline, and presence to the user's path.
+You are Spirit — a hybrid Mind•Body•Brand intelligence designed as a Founder Operating System.
 
 Your identity:
 - Calm, grounded, identity-focused.
 - Speak like the user's future self — wiser, steadier, more certain.
 - Short, potent sentences. No rambling.
-- No generic coaching tone. No therapy tone.
+- No generic coaching clichés. No therapy tone.
 - No long lists unless the user explicitly asks.
-- Mystical clarity, not mystical fog.
+- Clarity over hype. Presence over noise.
 
 Mission:
 - Bridge mind, body, and brand through disciplined creation.
@@ -159,25 +129,26 @@ Core behavioral structure (implicit in your reasoning, not explained in the repl
 4. Reinforce: Close with an identity-based reminder of who the user is becoming.
 
 Tone:
-${toneDescriptor}
+- Founder-grade: direct, composed, precise.
+- No “you got this!” fluff. Reinforce identity instead.
+- If the user is overwhelmed, simplify. If they are focused, sharpen.
 
 Mode:
-Current mode: ${mode.toUpperCase()}.
+Current mode: ${String(mode || "").toUpperCase()}.
 ${modeLine}
 
 Previous context:
 ${previousContext}
 
 Style rules:
-- Replies: 3–7 sentences unless the user asks for depth or a full plan.
-- You may use *one short action list* only if it increases clarity.
+- Replies: ~3–7 sentences unless the user asks for depth or a full plan.
+- You may use one short action list only if it increases clarity.
 - Avoid generic motivational language.
-- Avoid “coach voice” unless mode=high-performance and the user explicitly wants it.
 - In ORACLE mode: zoom out, then land on grounded truth.
 - In REFLECTION mode: mirror, acknowledge, give one direction.
 - Presence first. Clarity second. Action third.
 
-Your job: respond as Spirit v4.x with this identity, tone, and structure.
+Your job: respond as Spirit with this identity, tone, and structure.
 `.trim();
 }
 
@@ -292,15 +263,9 @@ function parseFitnessMeta(raw = "") {
     return m ? m[1].trim() : null;
   }
 
-  const goal =
-    pick("Training Goal") ||
-    pick("Goal") ||
-    null;
+  const goal = pick("Training Goal") || pick("Goal") || null;
 
-  const experience =
-    pick("Experience Level") ||
-    pick("Experience") ||
-    null;
+  const experience = pick("Experience Level") || pick("Experience") || null;
 
   const days =
     pick("Workout Days per week") ||
@@ -308,9 +273,7 @@ function parseFitnessMeta(raw = "") {
     pick("Days per week") ||
     null;
 
-  const tone =
-    pick("Tone") ||
-    null;
+  const tone = pick("Tone") || null;
 
   const specificGoal =
     pick("Specific Goal / Focus") ||
@@ -319,15 +282,9 @@ function parseFitnessMeta(raw = "") {
     pick("Specific Focus") ||
     null;
 
-  const weight =
-    pick("User Weight") ||
-    pick("Weight") ||
-    null;
+  const weight = pick("User Weight") || pick("Weight") || null;
 
-  const height =
-    pick("User Height") ||
-    pick("Height") ||
-    null;
+  const height = pick("User Height") || pick("Height") || null;
 
   return { goal, experience, days, tone, specificGoal, weight, height };
 }
@@ -407,7 +364,7 @@ Remember:
 // ─────────────────────────────────────────────
 async function extractWorkouts(planText) {
   const systemPrompt = `
-You are Spirit v4.x.
+You are Spirit.
 
 Convert the user's long training plan into a JSON array of daily structured workouts.
 
@@ -469,24 +426,20 @@ ${planText}
 
 // ─────────────────────────────────────────────
 //  POST /chat — main intelligence endpoint
-//  Supports:
-//    - simple: { prompt, tone, sessionId }
-//    - chatty: { prompt, tone, sessionId, messages: [{role, content}, ...] }
-//    - fitness: { ... plus goalCategory, specificGoal, experience, days, weight, height, gender }
 // ─────────────────────────────────────────────
 router.post("/", async (req, res) => {
   const {
     prompt,
     userId,
     sessionId,
-    tone,
+    tone, // kept for compatibility with frontend but no longer controls Spirit's core tone
     mode: explicitMode,
     messages,
     gender,         // optional, can be wired from frontend
-    goalCategory,   // new: main training goal from FitnessMode
-    specificGoal,   // new: second-level specific focus
-    experience: expFromBody, // new: experience level
-    days: daysFromBody,      // new: days per week
+    goalCategory,   // main training goal from FitnessMode
+    specificGoal,   // second-level specific focus
+    experience: expFromBody, // experience level
+    days: daysFromBody,      // days per week
     weight,
     height,
   } = req.body || {};
@@ -509,24 +462,24 @@ router.post("/", async (req, res) => {
     //  Special branch: CREATOR MODE
     // ─────────────────────────────
     if (mode === "creator") {
-      const systemPrompt = `
-You are Spirit v4.x — a media team, not a motivational coach.
+      const creatorSystemPrompt = `
+You are Spirit — a media operator for high-performance founders and creators.
 
 Your job:
-- Turn the user's niche + format into EXECUTABLE content
-- Propose specific video/post ideas
-- For each idea, give:
-  - Title
-  - What the video focuses on
-  - Suggested posting time window
-  - Hashtags (platform-appropriate)
-  - One sentence on WHY you recommend that idea
+- Turn the user's niche + format into EXECUTABLE content.
+- Propose specific video/post ideas.
+For each idea, give:
+- Title
+- What the piece focuses on
+- Suggested posting time window
+- Hashtags (platform-appropriate)
+- One sentence on WHY you recommend that idea.
 
 Keep it:
 - clear
 - practical
-- ready to record
-No long motivational speeches. No therapy tone.
+- ready to record.
+No therapy tone. No hype. No generic motivation.
 `.trim();
 
       const historyMessages = Array.isArray(messages)
@@ -546,7 +499,7 @@ No long motivational speeches. No therapy tone.
       const completion = await client.chat.completions.create({
         model: process.env.SPIRIT_MODEL || "gpt-4o-mini",
         messages: [
-          { role: "system", content: systemPrompt },
+          { role: "system", content: creatorSystemPrompt },
           ...historyMessages,
           { role: "user", content: rawText },
         ],
@@ -556,11 +509,11 @@ No long motivational speeches. No therapy tone.
 
       const reply =
         completion.choices?.[0]?.message?.content?.trim() ||
-        "Here are some ideas to start creating.";
+        "Here are some direct, executable content ideas to start with.";
 
       return res.json({
         ok: true,
-        service: "Spirit v4.x",
+        service: "Spirit",
         mode,
         tone: tone || "default",
         reply,
@@ -572,22 +525,22 @@ No long motivational speeches. No therapy tone.
     //  Special branch: HYBRID MODE
     // ─────────────────────────────
     if (mode === "hybrid") {
-      const systemPrompt = `
-You are Spirit v4.x — a hybrid Mind•Body•Brand coach.
+      const hybridSystemPrompt = `
+You are Spirit — a hybrid Mind•Body•Brand operating system for founders.
 
 Blend:
 - training
 - mindset
 - content/brand
 
-into ONE coherent operating system for the user.
-Keep it practical and identity-based.
+into ONE coherent response for the user.
+Keep it practical, identity-based, and concise.
 `.trim();
 
       const completion = await client.chat.completions.create({
         model: process.env.SPIRIT_MODEL || "gpt-4o-mini",
         messages: [
-          { role: "system", content: systemPrompt },
+          { role: "system", content: hybridSystemPrompt },
           { role: "user", content: rawText },
         ],
         temperature: Number(process.env.SPIRIT_TEMPERATURE || 0.7),
@@ -596,11 +549,11 @@ Keep it practical and identity-based.
 
       const reply =
         completion.choices?.[0]?.message?.content?.trim() ||
-        "Let’s align your mind, body, and brand into one clear system.";
+        "Let’s align your mind, body, and brand into one clear operating system.";
 
       return res.json({
         ok: true,
-        service: "Spirit v4.x",
+        service: "Spirit",
         mode,
         tone: tone || "default",
         reply,
@@ -615,7 +568,6 @@ Keep it practical and identity-based.
 
     const systemPrompt = buildSystemPrompt({
       mode,
-      tone,
       lastIntention,
       lastReflection,
     });
@@ -714,7 +666,7 @@ Keep it practical and identity-based.
 
     return res.json({
       ok: true,
-      service: "Spirit v4.x",
+      service: "Spirit",
       mode,
       tone: tone || "default",
       reply,
