@@ -7,6 +7,9 @@ import cors from "cors";
 import healthRouter from "./routes/health.js";
 import chatRouter from "./routes/chat.js";
 import liveRouter from "./routes/live.js";
+import sessionRouter from "./routes/session.js";
+
+app.use("/session", sessionRouter);
 
 // ─────────────────────────────────────────────
 //  Initialize
