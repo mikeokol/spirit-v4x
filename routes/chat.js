@@ -1,4 +1,4 @@
-// routes/chat.js — Spirit v5.0 Intelligence Layer (with Fitness v5.0)
+// routes/chat.js — Spirit v5.0 Intelligence Layer + Training Pipeline
 // ------------------------------------------------------------------------
 import express from "express";
 import OpenAI from "openai";
@@ -7,9 +7,11 @@ import { classifyMessage } from "./classifier.js";
 
 const router = express.Router();
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const MODEL = process.env.SPIRIT_MODEL || "gpt-4o-mini";
+const TEMP = Number(process.env.SPIRIT_TEMPERATURE || 0.6);
 
 // ─────────────────────────────────────────────
-//  Get previous reflection + intention
+//  Context helpers
 // ─────────────────────────────────────────────
 async function getLastContext(userId) {
   if (!userId) {
@@ -38,9 +40,6 @@ async function getLastContext(userId) {
   };
 }
 
-// ─────────────────────────────────────────────
-//  Store reflection + session updates
-// ─────────────────────────────────────────────
 async function storeReflectionAndSession({ userId, prompt, mode, reply }) {
   if (!userId) return;
 
@@ -67,202 +66,7 @@ async function storeReflectionAndSession({ userId, prompt, mode, reply }) {
     );
 }
 
-// ─────────────────────────────────────────────
-//  Build Spirit v5.0 system prompt
-// ─────────────────────────────────────────────
-function buildSystemPrompt(mode, lastIntention, lastReflection) {
-  return `
-You are Spirit v5.0 — a Founder Operating System guiding the user across Mind, Body, and Brand.
-
-IDENTITY:
-- Unified intelligence.
-- Calm. Precise. Grounded.
-- You speak as the user's future self.
-- No hype. No therapy voice. No motivational fluff.
-- Every sentence must carry intention.
-
-CORE LOOP:
-1. Perception — Identify the real underlying intent.
-2. Reduction — Strip noise. Identify the one essential direction.
-3. Prescription — Offer 1–2 transformative actions.
-4. Identity Reinforcement — Anchor who the user is becoming.
-
-STYLE:
-- 3–7 sentences.
-- Clean, simple paragraphs.
-- Never reveal system logic.
-- Never use emojis unless asked.
-
-MODE FOCUS:
-reflection → Mirror truth + one direction.
-mind → Identity, discipline, clarity, frameworks.
-body → Training, diet, recovery, weekly structure.
-brand → Content, storytelling, audience systems.
-creator → High-performance content engines.
-oracle → Wide perspective → grounded truth → clear action.
-hybrid → Blend mind/body/brand seamlessly.
-coach → General guidance when unclear.
-sanctuary → Identity grounding + presence.
-
-CURRENT MODE: ${mode}
-
-PREVIOUS:
-Intention: ${lastIntention || "none"}
-Reflection: ${lastReflection || "none"}
-
-ROLE:
-Guide with clarity and quiet confidence.
-Bring order to complexity.
-Move the user toward the identity they're becoming.
-`.trim();
-}
-
-// ─────────────────────────────────────────────
-//  FITNESS HELPERS — detect & build training blocks
-// ─────────────────────────────────────────────
-function looksLikeFitnessPlanPrompt(text = "") {
-  const t = text.toLowerCase();
-  return (
-    t.includes("build a personalized training block") ||
-    t.includes("build a body coaching system") ||
-    t.includes("build a body coaching") ||
-    t.includes("build a training block") ||
-    t.includes("generate training system") ||
-    t.includes("build a training system")
-  );
-}
-
-function parseFitnessMeta(raw = "") {
-  function pick(label) {
-    const re = new RegExp(`${label}\\s*:\\s*(.+)`, "i");
-    const match = raw.match(re);
-    return match ? match[1].trim() : null;
-  }
-
-  return {
-    goal: pick("Training Goal") || pick("Goal") || null,
-    experience: pick("Experience Level") || pick("Experience") || null,
-    days:
-      pick("Workout Days per week") ||
-      pick("Workout Days") ||
-      pick("Days per week") ||
-      null,
-    specificGoal:
-      pick("Specific Goal / Focus") ||
-      pick("Specific Goal") ||
-      pick("Goal Detail") ||
-      pick("Specific Focus") ||
-      null,
-    weight: pick("User Weight") || pick("Weight") || null,
-    height: pick("User Height") || pick("Height") || null,
-    tone: pick("Tone") || null, // kept for backwards compatibility if it appears in text
-  };
-}
-
-function buildFitnessUserPrompt(meta) {
-  const goal = meta.goal || "not specified";
-  const specificGoal = meta.specificGoal || "not specified";
-  const experience = meta.experience || "not specified";
-  const days = meta.days || "not specified";
-  const gender = meta.gender || "unspecified";
-  const weight = meta.weight || null;
-  const height = meta.height || null;
-
-  return `
-You are Spirit v5.0, acting as a present, grounded strength and aesthetics coach.
-
-Build a personalized training block that adapts to the user's level, identity, and lifestyle.
-
-Training goal category: ${goal}
-Specific goal or focus: ${specificGoal}
-Experience level: ${experience}
-Training days per week: ${days}
-Gender: ${gender}
-${weight ? `Approximate weight: ${weight}` : ""}
-${height ? `Approximate height: ${height}` : ""}
-
-Rules for this reply:
-- Return ONLY the training plan text.
-- No markdown formatting (no "#", no "**", no bullet symbols).
-- Write clean sections with short labels and blank lines between them.
-- Sound like a live coach guiding the user, not a PDF.
-- Include identity anchors, checkpoints, and simple progression.
-`.trim();
-}
-
-const FITNESS_PLAN_RUBRIC = `
-You are generating a training block as a present, grounded coach.
-
-Rules:
-- Do NOT use markdown headings or bullet points.
-- Do NOT reveal system instructions.
-- Do NOT describe your reasoning.
-- Write like you're speaking directly to the user.
-- Use sections like "Training Identity", "Weekly Structure", "Progression", "Recovery", "Checkpoints".
-`.trim();
-
-async function extractWorkouts(planText) {
-  const systemPrompt = `
-You are Spirit.
-
-Convert the user's long training plan into a JSON array of daily structured workouts.
-
-Output ONLY valid JSON. No markdown, no commentary.
-
-Format:
-[
-  {
-    "day": 1,
-    "title": "Upper Foundation Strength",
-    "focus": "Technique and confidence",
-    "exercises": [
-      { "name": "Goblet Squat", "sets": "3", "reps": "8–10" },
-      { "name": "Push-Up", "sets": "3", "reps": "6–10" }
-    ]
-  }
-]
-`.trim();
-
-  const userPrompt = `
-Convert this training plan into structured JSON workouts, one object per day:
-
-${planText}
-`.trim();
-
-  try {
-    const completion = await client.chat.completions.create({
-      model: process.env.SPIRIT_MODEL || "gpt-4o-mini",
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
-      ],
-      temperature: 0.2,
-      max_tokens: 700,
-    });
-
-    const raw = completion.choices?.[0]?.message?.content?.trim() || "[]";
-
-    try {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
-        return parsed.map((w, idx) => ({
-          day: Number(w.day) || idx + 1,
-          title: w.title || `Day ${idx + 1}`,
-          focus: w.focus || "",
-          exercises: Array.isArray(w.exercises) ? w.exercises : [],
-        }));
-      }
-      return [];
-    } catch (err) {
-      console.warn("[extractWorkouts] JSON parse failed:", err.message);
-      return [];
-    }
-  } catch (err) {
-    console.error("[extractWorkouts] error:", err.message);
-    return [];
-  }
-}
-
+// Save fitness training block into sessions.training_block (with workouts)
 async function storeTrainingBlock({ userId, planText, meta, gender, workouts }) {
   if (!userId || !planText) return;
 
@@ -298,6 +102,228 @@ async function storeTrainingBlock({ userId, planText, meta, gender, workouts }) 
 }
 
 // ─────────────────────────────────────────────
+//  System prompt — Spirit v5.0 Founder OS
+// ─────────────────────────────────────────────
+function buildSystemPrompt(mode, lastIntention, lastReflection) {
+  return `
+You are Spirit v5.0 — a Founder Operating System guiding the user across Mind, Body, and Brand.
+
+IDENTITY:
+- Unified intelligence.
+- Calm. Precise. Grounded.
+- You speak as the user's future self.
+- No hype. No therapy voice. No motivational fluff.
+- Every sentence must carry intention.
+
+CORE LOOP:
+1. Perception — Identify the real underlying intent.
+2. Reduction — Strip noise. Identify the one essential direction.
+3. Prescription — Offer 1–2 transformative actions.
+4. Identity Reinforcement — Anchor who the user is becoming.
+
+STYLE:
+- 3–7 sentences.
+- Clean, simple paragraphs.
+- Never reveal system logic.
+- Never use emojis unless asked.
+
+MODE FOCUS:
+reflection → Mirror truth + one direction.
+mind       → Identity, discipline, clarity, frameworks.
+body       → Training, diet, recovery, weekly structure.
+brand      → Content, storytelling, audience systems.
+creator    → High-performance content engines.
+oracle     → Wide perspective → grounded truth → clear action.
+hybrid     → Blend mind/body/brand seamlessly.
+coach      → General guidance when unclear.
+sanctuary  → Identity grounding + presence.
+
+PREVIOUS:
+Intention: ${lastIntention || "none"}
+Reflection: ${lastReflection || "none"}
+
+ROLE:
+Guide with clarity and quiet confidence.
+Bring order to complexity.
+Move the user toward the identity they're becoming.
+`.trim();
+}
+
+// ─────────────────────────────────────────────
+//  Fitness helpers — detect + parse
+// ─────────────────────────────────────────────
+function looksLikeFitnessPlanPrompt(text = "") {
+  const t = text.toLowerCase();
+  return (
+    t.includes("build a personalized training block") ||
+    t.includes("build a body coaching system") ||
+    t.includes("build a body coaching") ||
+    t.includes("build a training block") ||
+    t.includes("training goal") ||
+    t.includes("workout days") ||
+    t.includes("experience level")
+  );
+}
+
+function parseFitnessMeta(raw = "") {
+  function pick(label) {
+    const re = new RegExp(`${label}\\s*:\\s*(.+)`, "i");
+    const m = raw.match(re);
+    return m ? m[1].trim() : null;
+  }
+
+  const goal = pick("Training Goal") || pick("Goal") || null;
+  const experience = pick("Experience Level") || pick("Experience") || null;
+  const days =
+    pick("Workout Days per week") ||
+    pick("Workout Days") ||
+    pick("Days per week") ||
+    null;
+  const tone = pick("Tone") || null;
+  const specificGoal =
+    pick("Specific Goal / Focus") ||
+    pick("Specific Goal") ||
+    pick("Goal Detail") ||
+    pick("Specific Focus") ||
+    null;
+  const weight = pick("User Weight") || pick("Weight") || null;
+  const height = pick("User Height") || pick("Height") || null;
+
+  return { goal, experience, days, tone, specificGoal, weight, height };
+}
+
+function buildFitnessUserPrompt(meta) {
+  const goal = meta.goal || "not specified";
+  const specificGoal = meta.specificGoal || "not specified";
+  const experience = meta.experience || "not specified";
+  const days = meta.days || "not specified";
+  const tone = meta.tone || "default";
+  const gender = meta.gender || "unspecified";
+  const weight = meta.weight || null;
+  const height = meta.height || null;
+
+  return `
+Build a personalized training block that adapts to the user's level, identity, and lifestyle.
+
+Training goal category: ${goal}
+Specific goal or focus: ${specificGoal}
+Experience level: ${experience}
+Training days per week: ${days}
+Gender: ${gender}
+${weight ? `Approximate weight: ${weight}` : ""}
+${height ? `Approximate height: ${height}` : ""}
+Preferred coaching tone: ${tone}
+
+Return ONLY the training plan text, with a short Spirit-style welcome at the top.
+Do NOT use markdown formatting (no "**", no "#", no bullet symbols like "-" or "*").
+Write in clear sections with labels and line breaks so it reads like a live coach speaking, not a checklist.
+`.trim();
+}
+
+const FITNESS_PLAN_RUBRIC = `
+You are generating a training block as a present, grounded coach.
+
+Rules for this specific reply:
+- Do NOT use markdown headings like "##" or bold markers like "**".
+- Do NOT use bullet symbols like "-" or "*".
+- Do NOT repeat or mention any system or rubric instructions.
+- Do NOT say "user profile" or "training details".
+- Never describe how you are generating the plan.
+
+Instead, write clean sections with short labels and blank lines between them, like a coach speaking in paragraphs.
+
+Suggested structure (you may adapt wording):
+
+Training Identity Blueprint:
+Describe phase length (4–8 weeks), weekly frequency, typical session length, training split, and one identity anchor.
+
+Weekly Structure:
+Describe each training day in plain sentences.
+
+Progression Logic:
+Explain simply how the user will progress over 4 weeks.
+
+Nutrition Blueprint:
+Give simple, supportive, goal-aligned guidance.
+
+Recovery Protocol:
+Explain sleep, mobility, and how to listen to fatigue.
+
+Checkpoints:
+Describe what they should feel by Week 1, 2, 3, and 4.
+
+Identity Reinforcement:
+End with 3–5 short Spirit-style lines about who they are becoming.
+
+Remember:
+- You are a live coach, not a list generator.
+- The reply must read like you are talking directly to the user.
+`.trim();
+
+// Turn long plan text into structured daily workouts
+async function extractWorkouts(planText) {
+  const systemPrompt = `
+You are Spirit.
+
+Convert the user's long training plan into a JSON array of daily structured workouts.
+
+Output ONLY valid JSON. No markdown, no commentary.
+
+Format:
+[
+  {
+    "day": 1,
+    "title": "Upper Foundation Strength",
+    "focus": "Technique and confidence",
+    "exercises": [
+      { "name": "Goblet Squat", "sets": "3", "reps": "8–10" },
+      { "name": "Push-Up", "sets": "3", "reps": "6–10" }
+    ]
+  }
+]
+`.trim();
+
+  const userPrompt = `
+Convert this training plan into structured JSON workouts, one object per day:
+
+${planText}
+`.trim();
+
+  try {
+    const completion = await client.chat.completions.create({
+      model: MODEL,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+      temperature: 0.2,
+      max_tokens: 700,
+    });
+
+    const raw = completion.choices?.[0]?.message?.content?.trim() || "[]";
+
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed.map((w, idx) => ({
+          day: Number(w.day) || idx + 1,
+          title: w.title || `Day ${idx + 1}`,
+          focus: w.focus || "",
+          exercises: Array.isArray(w.exercises) ? w.exercises : [],
+        }));
+      }
+      return [];
+    } catch (err) {
+      console.warn("[extractWorkouts] JSON parse failed:", err.message);
+      return [];
+    }
+  } catch (err) {
+    console.error("[extractWorkouts] error:", err.message);
+    return [];
+  }
+}
+
+// ─────────────────────────────────────────────
 //  POST /chat — Main intelligence endpoint
 // ─────────────────────────────────────────────
 router.post("/", async (req, res) => {
@@ -306,15 +332,14 @@ router.post("/", async (req, res) => {
     userId,
     sessionId,
     messages,
-
-    // Optional fitness metadata from frontend (Fitness Mode)
+    // optional fitness meta from frontend
     goalCategory,
     specificGoal,
     experience: expFromBody,
     days: daysFromBody,
-    gender,
     weight,
     height,
+    gender,
   } = req.body || {};
 
   if (!prompt || typeof prompt !== "string") {
@@ -328,13 +353,74 @@ router.post("/", async (req, res) => {
     // STEP 1 — classify using LLM
     const mode = await classifyMessage(text);
 
-    // STEP 2 — load previous intent / reflection
-    const { lastIntention, lastReflection } = await getLastContext(effectiveUserId);
+    // Special creator branch (content engine)
+    if (mode === "creator") {
+      const creatorSystemPrompt = `
+You are Spirit — a media operator for high-performance founders and creators.
 
-    // STEP 3 — build base system prompt
-    const systemPrompt = buildSystemPrompt(mode, lastIntention, lastReflection);
+Your job:
+- Turn the user's niche + format into EXECUTABLE content.
+- Propose specific video/post ideas.
+For each idea, give:
+- Title
+- What the piece focuses on
+- Suggested posting time window
+- Hashtags (platform-appropriate)
+- One sentence on WHY you recommend that idea.
 
-    // STEP 4 — safe history
+Keep it:
+- clear
+- practical
+- ready to record.
+No therapy tone. No hype. No generic motivation.
+`.trim();
+
+      const safeHistory = Array.isArray(messages)
+        ? messages
+            .filter(
+              (m) =>
+                m &&
+                typeof m.content === "string" &&
+                (m.role === "user" || m.role === "assistant")
+            )
+            .map((m) => ({ role: m.role, content: m.content }))
+        : [];
+
+      const completion = await client.chat.completions.create({
+        model: MODEL,
+        messages: [
+          { role: "system", content: creatorSystemPrompt },
+          ...safeHistory,
+          { role: "user", content: text },
+        ],
+        temperature: Number(process.env.SPIRIT_TEMPERATURE || 0.7),
+        max_tokens: 900,
+      });
+
+      const reply =
+        completion.choices?.[0]?.message?.content?.trim() ||
+        "Here are some direct, executable content ideas to start with.";
+
+      return res.json({
+        ok: true,
+        service: "Spirit v5.0",
+        mode,
+        reply,
+        ts: new Date().toISOString(),
+      });
+    }
+
+    // STEP 2 — previous context for normal modes
+    const { lastIntention, lastReflection } = await getLastContext(
+      effectiveUserId
+    );
+
+    const systemPrompt = buildSystemPrompt(
+      mode,
+      lastIntention,
+      lastReflection
+    );
+
     const safeHistory = Array.isArray(messages)
       ? messages
           .filter(
@@ -346,55 +432,51 @@ router.post("/", async (req, res) => {
           .map((m) => ({ role: m.role, content: m.content }))
       : [];
 
-    // ─────────────────────────────────────
-    //  FITNESS PLAN PATH (v5.0)
-    // ─────────────────────────────────────
+    // STEP 3 — detect FITNESS PLAN path
     let isFitnessPlan = false;
     let fitnessMeta = null;
     let userPromptForModel = text;
     const extraSystemMessages = [];
 
-    const hasFitnessMeta =
-      goalCategory || specificGoal || expFromBody || daysFromBody || gender || weight || height;
-
-    if (mode === "body" && (looksLikeFitnessPlanPrompt(text) || hasFitnessMeta)) {
+    if (mode === "body" && (looksLikeFitnessPlanPrompt(text) || goalCategory)) {
       isFitnessPlan = true;
 
-      const fromText = parseFitnessMeta(text);
+      const metaFromText = parseFitnessMeta(text);
 
       fitnessMeta = {
-        ...fromText,
-        goal: goalCategory || fromText.goal,
-        specificGoal: specificGoal || fromText.specificGoal,
-        experience: expFromBody || fromText.experience,
-        days: daysFromBody || fromText.days,
-        weight: weight || fromText.weight,
-        height: height || fromText.height,
-        gender: gender || fromText.gender || null,
+        ...metaFromText,
+        goal: goalCategory || metaFromText.goal,
+        specificGoal: specificGoal || metaFromText.specificGoal,
+        experience: expFromBody || metaFromText.experience,
+        days: daysFromBody || metaFromText.days,
+        weight: weight || metaFromText.weight,
+        height: height || metaFromText.height,
+        gender: gender || null,
+        tone: metaFromText.tone || "default",
       };
 
       userPromptForModel = buildFitnessUserPrompt(fitnessMeta);
       extraSystemMessages.push({ role: "system", content: FITNESS_PLAN_RUBRIC });
     }
 
-    // STEP 5 — generate reply (generic or fitness)
+    // STEP 4 — generate reply
     const completion = await client.chat.completions.create({
-      model: process.env.SPIRIT_MODEL || "gpt-4o-mini",
+      model: MODEL,
       messages: [
         { role: "system", content: systemPrompt },
         ...extraSystemMessages,
         ...safeHistory,
         { role: "user", content: userPromptForModel },
       ],
-      temperature: 0.6,
-      max_tokens: 800,
+      temperature: TEMP,
+      max_tokens: Number(process.env.SPIRIT_MAX_TOKENS || 800),
     });
 
     const reply =
       completion.choices?.[0]?.message?.content?.trim() ||
-      "I’m here. What do you need clarity on?";
+      "I’m here. Let’s take one clear step. What do you need right now?";
 
-    // STEP 6 — store reflection if needed
+    // STEP 5 — store reflection if needed
     if (mode === "reflection" || text.toLowerCase().startsWith("i choose ")) {
       await storeReflectionAndSession({
         userId: effectiveUserId,
@@ -404,7 +486,7 @@ router.post("/", async (req, res) => {
       });
     }
 
-    // STEP 7 — if we built a training block, store it for Live Mode
+    // STEP 6 — store training block when we generated a plan
     if (isFitnessPlan && effectiveUserId) {
       const workouts = await extractWorkouts(reply);
 
@@ -412,27 +494,20 @@ router.post("/", async (req, res) => {
         userId: effectiveUserId,
         planText: reply,
         meta: fitnessMeta || {},
-        gender: gender || "unspecified",
+        gender: fitnessMeta?.gender || "unspecified",
         workouts,
       });
-
-      if (gender) {
-        await supabase
-          .from("sessions")
-          .update({ gender })
-          .eq("user_id", effectiveUserId);
-      }
     }
 
     return res.json({
       ok: true,
-      service: "Spirit",
+      service: "Spirit v5.0",
       mode,
       reply,
       ts: new Date().toISOString(),
     });
   } catch (err) {
-    console.error("[Spirit /chat error]", err.message);
+    console.error("[Spirit /chat error]", err?.message || err);
 
     return res.status(500).json({
       ok: false,
