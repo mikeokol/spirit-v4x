@@ -1,4 +1,4 @@
-// index.js — Spirit v5.0 Server Entrypoint
+// index.js — Spirit v5.0 Backend Entrypoint
 // -----------------------------------------
 import "dotenv/config";
 import express from "express";
@@ -9,43 +9,32 @@ import chatRouter from "./routes/chat.js";
 import liveRouter from "./routes/live.js";
 import sessionRouter from "./routes/session.js";
 
-app.use("/session", sessionRouter);
-
-// ─────────────────────────────────────────────
-//  Initialize
-// ─────────────────────────────────────────────
 const app = express();
 
-// ─────────────────────────────────────────────
-//  CORS — allow Lovable, localhost, and preview links
-// ─────────────────────────────────────────────
+// CORS for Lovable + local dev
 app.use(
   cors({
     origin: [
       "http://localhost:3000",
-      "http://localhost:5173",
-      /\.lovable\.app$/, // Allow ANY Lovable preview or deployed domain
+      /\.lovable\.app$/,
+      "https://spirit-ai-coach-creator.lovable.app",
     ],
     methods: ["GET", "POST"],
-    allowedHeaders: ["Content-Type", "Authorization"],
+    allowedHeaders: ["Content-Type", "Authorization", "x-user-id"],
   })
 );
 
-// ─────────────────────────────────────────────
-//  Middleware
-// ─────────────────────────────────────────────
-app.use(express.json({ limit: "2mb" }));
+app.use(express.json());
 
-// ─────────────────────────────────────────────
-//  Routes
-// ─────────────────────────────────────────────
+// ROUTES
 app.use("/health", healthRouter);
 app.use("/chat", chatRouter);
 app.use("/live", liveRouter);
+app.use("/session", sessionRouter);
 
-// Root sanity check
+// ROOT: sanity check
 app.get("/", (_req, res) => {
-  res.status(200).json({
+  res.json({
     ok: true,
     service: "Spirit v5.0",
     message: "You have arrived. Breathe. We begin.",
@@ -53,11 +42,8 @@ app.get("/", (_req, res) => {
   });
 });
 
-// ─────────────────────────────────────────────
-//  Start Server
-// ─────────────────────────────────────────────
-const PORT = process.env.PORT || 3000;
-
+// START SERVER
+const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log(`🔥 Spirit v5.0 active on port ${PORT}`);
 });
