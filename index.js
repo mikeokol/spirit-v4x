@@ -1,5 +1,4 @@
 // index.js — Spirit v5.0 Backend Entrypoint
-// -----------------------------------------
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
@@ -8,16 +7,18 @@ import healthRouter from "./routes/health.js";
 import chatRouter from "./routes/chat.js";
 import liveRouter from "./routes/live.js";
 import sessionRouter from "./routes/session.js";
+import fitnessRouter from "./routes/fitness.js";   // <-- MUST IMPORT
 
 const app = express();
 
-// CORS for Lovable + local dev
+// CORS
 app.use(
   cors({
     origin: [
       "http://localhost:3000",
       /\.lovable\.app$/,
       "https://spirit-ai-coach-creator.lovable.app",
+      "https://spirit-v4x.lovable.app"           // <-- ADD THIS
     ],
     methods: ["GET", "POST"],
     allowedHeaders: ["Content-Type", "Authorization", "x-user-id"],
@@ -31,8 +32,9 @@ app.use("/health", healthRouter);
 app.use("/chat", chatRouter);
 app.use("/live", liveRouter);
 app.use("/session", sessionRouter);
+app.use("/fitness", fitnessRouter);  // <-- MUST BE ADDED
 
-// ROOT: sanity check
+// Sanity root
 app.get("/", (_req, res) => {
   res.json({
     ok: true,
@@ -43,7 +45,7 @@ app.get("/", (_req, res) => {
 });
 
 // START SERVER
-const PORT = process.env.PORT || 10000;
+const PORT = process.env.PORT;
 app.listen(PORT, () => {
   console.log(`🔥 Spirit v5.0 active on port ${PORT}`);
 });
