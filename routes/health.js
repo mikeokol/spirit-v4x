@@ -1,16 +1,15 @@
 // routes/health.js — Spirit v5.1 Health Check
-// --------------------------------------------------
 
 import express from "express";
+
 const router = express.Router();
 
-// Basic health check
 router.get("/", (_req, res) => {
   res.status(200).json({
     ok: true,
     service: "Spirit v5.1",
-    status: "online",
-    ts: new Date().toISOString(),
+    message: "Health stable",
+    ts: new Date().toISOString()
   });
 });
 

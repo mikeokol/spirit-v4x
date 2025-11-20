@@ -1,59 +1,34 @@
 // index.js — Spirit v5.1 Server Entrypoint
-// ------------------------------------------------------
 
-import "dotenv/config";
 import express from "express";
-import cors from "cors";
+import bodyParser from "body-parser";
+import "dotenv/config";
 
 import healthRouter from "./routes/health.js";
-import chatRouter from "./chat.js"; // wrapper for ChatController.js
+import chatRouter from "./routes/chat.js";
 
-// ─────────────────────────────────────────────
-//  Initialize App
-// ─────────────────────────────────────────────
+// NEW v5.1 routers
+import fitnessRouter from "./routes/fitness.js";
+import creatorRouter from "./routes/creator.js";
+import reflectionRouter from "./routes/reflection.js";
+
 const app = express();
+app.use(bodyParser.json());
 
-// ─────────────────────────────────────────────
-//  CORS — allow Lovable + localhost
-// ─────────────────────────────────────────────
-app.use(
-  cors({
-    origin: [
-      "http://localhost:3000",
-      "https://spirit-ai-coach-creator.lovable.app",
-      /\.lovable\.app$/,
-    ],
-    methods: ["GET", "POST"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-  })
-);
-
-// ─────────────────────────────────────────────
-//  Middleware
-// ─────────────────────────────────────────────
-app.use(express.json());
-
-// ─────────────────────────────────────────────
-//  Routes
-// ─────────────────────────────────────────────
+// Routes
 app.use("/health", healthRouter);
 app.use("/chat", chatRouter);
+app.use("/fitness", fitnessRouter);
+app.use("/creator", creatorRouter);
+app.use("/reflection", reflectionRouter);
 
-// Root route — simple sanity check
-app.get("/", (req, res) => {
-  res.status(200).json({
+app.get("/", (_req, res) => {
+  res.json({
     ok: true,
     service: "Spirit v5.1",
     message: "You have arrived. Breathe. We begin.",
-    ts: new Date().toISOString(),
   });
 });
 
-// ─────────────────────────────────────────────
-//  Start Server
-// ─────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
-
-app.listen(PORT, () => {
-  console.log(`🔥 Spirit backend running on port ${PORT}`);
-});
+app.listen(PORT, () => console.log(`Spirit v5.1 backend running on port ${PORT}`));

@@ -1,0 +1,10 @@
+// chat.js — Unified Sanctuary Router for Spirit v5.1
+
+import express from "express";
+import { chatController } from "../controllers/chatController.js";
+
+const router = express.Router();
+
+router.post("/", chatController);
+
+export default router;
