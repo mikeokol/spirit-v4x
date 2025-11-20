@@ -1,79 +1,59 @@
-// index.js — Spirit v4.x Entrypoint
-// ---------------------------------
+// index.js — Spirit v5.1 Server Entrypoint
+// ------------------------------------------------------
+
 import "dotenv/config";
 import express from "express";
-import rateLimit from "express-rate-limit";
 import cors from "cors";
 
 import healthRouter from "./routes/health.js";
-import chatRouter from "./routes/chat.js";
+import chatRouter from "./chat.js";   // wrapper for ChatController.js
 
+// ─────────────────────────────────────────────
+//  Initialize App
+// ─────────────────────────────────────────────
 const app = express();
 
-// ---------------------------------------------
-// CORS — Finalized Patch (Lovable-proof)
-// ---------------------------------------------
-const allowedOrigins = [
-  "http://localhost:3000",
-  /\.lovable\.app$/,
-  /\.lovableproject\.com$/,
-];
-
+// ─────────────────────────────────────────────
+//  CORS — allow Lovable + localhost
+// ─────────────────────────────────────────────
 app.use(
   cors({
-    origin: function (origin, callback) {
-      if (!origin) return callback(null, true);
-
-      const allowed = allowedOrigins.some((rule) =>
-        rule instanceof RegExp ? rule.test(origin) : rule === origin
-      );
-
-      if (allowed) return callback(null, true);
-
-      console.log("[CORS] Blocked origin:", origin);
-      return callback(new Error("Not allowed by CORS"));
-    },
-    credentials: false,
+    origin: [
+      "http://localhost:3000",
+      "https://spirit-ai-coach-creator.lovable.app",
+      /\.lovable\.app$/,
+    ],
+    methods: ["GET", "POST"],
+    allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
 
-// ---------------------------------------------
-// Rate Limiting — Protect API From Abuse
-// ---------------------------------------------
-const limiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 50,
-});
-app.use(limiter);
-
-// ---------------------------------------------
-// Middleware
-// ---------------------------------------------
+// ─────────────────────────────────────────────
+//  Middleware
+// ─────────────────────────────────────────────
 app.use(express.json());
 
-// ---------------------------------------------
-// Routes
-// ---------------------------------------------
+// ─────────────────────────────────────────────
+//  Routes
+// ─────────────────────────────────────────────
 app.use("/health", healthRouter);
 app.use("/chat", chatRouter);
 
-// Root confirmation route
-app.get("/", (_req, res) => {
-  res.json({
+// Root route — simple sanity check
+app.get("/", (req, res) => {
+  res.status(200).json({
     ok: true,
-    service: "Spirit v4.x",
-    msg: "You have arrived. Breathe. We begin.",
+    service: "Spirit v5.1",
+    message: "You have arrived. Breathe. We begin.",
     ts: new Date().toISOString(),
   });
 });
 
-// ---------------------------------------------
-// Start Server
-// ---------------------------------------------
-const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => {
-  console.log(`🜂 Spirit v4.x listening on port ${PORT}`);
-});
+// ─────────────────────────────────────────────
+//  Start Server
+// ─────────────────────────────────────────────
+const PORT = process.env.PORT || 3000;
 
-export default app;
-    
+app.listen(PORT, () => {
+  console.log(`🔥 Spirit backend running on port ${PORT}`);
+});
