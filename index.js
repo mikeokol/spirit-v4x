@@ -6,7 +6,7 @@ import express from "express";
 import cors from "cors";
 
 import healthRouter from "./routes/health.js";
-import chatRouter from "./chat.js";   // wrapper for ChatController.js
+import chatRouter from "./chat.js"; // wrapper for ChatController.js
 
 // ─────────────────────────────────────────────
 //  Initialize App

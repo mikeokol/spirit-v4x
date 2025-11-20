@@ -2,10 +2,9 @@
 // --------------------------------------------------
 
 import express from "express";
-
 const router = express.Router();
 
-// Basic health check (always safe)
+// Basic health check
 router.get("/", (_req, res) => {
   res.status(200).json({
     ok: true,
