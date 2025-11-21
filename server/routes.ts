@@ -13,7 +13,6 @@ import {
   insertScriptSchema, 
   insertReflectionSchema 
 } from "@shared/schema";
-import { randomUUID } from "crypto";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Chat routes
@@ -77,14 +76,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         validatedData.fitnessLevel
       );
       
-      const workout = {
-        id: randomUUID(),
-        title: generatedWorkout.title,
-        exercises: generatedWorkout.exercises,
-        timestamp: new Date().toISOString(),
-      };
+      const workout = await storage.addWorkout(
+        generatedWorkout.title,
+        generatedWorkout.exercises
+      );
       
-      await storage.addWorkout(workout);
       res.json(workout);
     } catch (error: any) {
       console.error("Error generating workout:", error);
@@ -118,15 +114,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         validatedData.tone
       );
       
-      const script = {
-        id: randomUUID(),
-        title: generatedScript.title,
-        type: generatedScript.type,
-        content: generatedScript.content,
-        timestamp: new Date().toISOString(),
-      };
+      const script = await storage.addScript(
+        generatedScript.title,
+        generatedScript.type,
+        generatedScript.content
+      );
       
-      await storage.addScript(script);
       res.json(script);
     } catch (error: any) {
       console.error("Error generating script:", error);
@@ -158,17 +151,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         validatedData.focus
       );
       
-      const reflection = {
-        id: randomUUID(),
-        title: generatedReflection.title,
-        wins: generatedReflection.wins,
-        challenges: generatedReflection.challenges,
-        growth: generatedReflection.growth,
-        tags: generatedReflection.tags,
-        timestamp: new Date().toISOString(),
-      };
+      const reflection = await storage.addReflection(
+        generatedReflection.title,
+        generatedReflection.wins,
+        generatedReflection.challenges,
+        generatedReflection.growth,
+        generatedReflection.tags
+      );
       
-      await storage.addReflection(reflection);
       res.json(reflection);
     } catch (error: any) {
       console.error("Error generating reflection:", error);
