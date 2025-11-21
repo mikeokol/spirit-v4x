@@ -25,8 +25,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Dumbbell, Loader2, Copy, RotateCcw, History } from "lucide-react";
+import { Dumbbell, Loader2, Copy, RotateCcw, History, Download, FileText } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { exportWorkoutAsPDF, exportWorkoutAsTXT } from "@/lib/export";
 
 export default function WorkoutsPage() {
   const [selectedWorkout, setSelectedWorkout] = useState<Workout | null>(null);
@@ -357,15 +358,35 @@ export default function WorkoutsPage() {
                           })}
                         </p>
                       </div>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleCopy(workout)}
-                        data-testid={`button-copy-${workout.id}`}
-                      >
-                        <Copy className="h-4 w-4 mr-2" />
-                        Copy
-                      </Button>
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleCopy(workout)}
+                          data-testid={`button-copy-${workout.id}`}
+                        >
+                          <Copy className="h-4 w-4 mr-2" />
+                          Copy
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => exportWorkoutAsPDF(workout)}
+                          data-testid={`button-export-pdf-${workout.id}`}
+                        >
+                          <Download className="h-4 w-4 mr-2" />
+                          PDF
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => exportWorkoutAsTXT(workout)}
+                          data-testid={`button-export-txt-${workout.id}`}
+                        >
+                          <FileText className="h-4 w-4 mr-2" />
+                          TXT
+                        </Button>
+                      </div>
                     </div>
                   </CardHeader>
                   <CardContent>

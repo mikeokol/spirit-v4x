@@ -19,8 +19,9 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
-import { Sparkles, Loader2, Copy, RotateCcw, History } from "lucide-react";
+import { Sparkles, Loader2, Copy, RotateCcw, History, Download, FileText } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { exportReflectionAsPDF, exportReflectionAsTXT } from "@/lib/export";
 
 export default function ReflectionsPage() {
   const [selectedReflection, setSelectedReflection] = useState<Reflection | null>(null);
@@ -340,15 +341,35 @@ export default function ReflectionsPage() {
                           })}
                         </p>
                       </div>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleCopy(reflection)}
-                        data-testid={`button-copy-${reflection.id}`}
-                      >
-                        <Copy className="h-4 w-4 mr-2" />
-                        Copy
-                      </Button>
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleCopy(reflection)}
+                          data-testid={`button-copy-${reflection.id}`}
+                        >
+                          <Copy className="h-4 w-4 mr-2" />
+                          Copy
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => exportReflectionAsPDF(reflection)}
+                          data-testid={`button-export-pdf-${reflection.id}`}
+                        >
+                          <Download className="h-4 w-4 mr-2" />
+                          PDF
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => exportReflectionAsTXT(reflection)}
+                          data-testid={`button-export-txt-${reflection.id}`}
+                        >
+                          <FileText className="h-4 w-4 mr-2" />
+                          TXT
+                        </Button>
+                      </div>
                     </div>
                   </CardHeader>
                   <CardContent>{renderReflectionContent(reflection)}</CardContent>

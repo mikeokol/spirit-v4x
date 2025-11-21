@@ -4,9 +4,16 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Send, Sparkles, User } from "lucide-react";
+import { Send, Sparkles, User, Download, FileText } from "lucide-react";
 import { type ChatMessage } from "@shared/schema";
 import { Skeleton } from "@/components/ui/skeleton";
+import { exportChatAsPDF, exportChatAsTXT } from "@/lib/export";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 export default function ChatPage() {
   const [input, setInput] = useState("");
@@ -61,7 +68,29 @@ export default function ChatPage() {
   return (
     <div className="flex flex-col h-full">
       {/* Messages Container */}
-      <div className="flex-1 overflow-y-auto px-4 py-8">
+      <div className="flex-1 overflow-y-auto px-4 py-8 relative">
+        {messages.length > 0 && (
+          <div className="absolute top-4 right-4 z-10">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" data-testid="button-export-chat">
+                  <Download className="h-4 w-4 mr-2" />
+                  Export
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => exportChatAsPDF(messages)} data-testid="button-export-chat-pdf">
+                  <Download className="h-4 w-4 mr-2" />
+                  Export as PDF
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => exportChatAsTXT(messages)} data-testid="button-export-chat-txt">
+                  <FileText className="h-4 w-4 mr-2" />
+                  Export as TXT
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        )}
         <div className="max-w-3xl mx-auto space-y-8">
           {isLoading ? (
             <div className="space-y-8">

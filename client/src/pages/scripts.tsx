@@ -25,8 +25,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { FileText, Loader2, Copy, RotateCcw, History } from "lucide-react";
+import { FileText, Loader2, Copy, RotateCcw, History, Download } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { exportScriptAsPDF, exportScriptAsTXT } from "@/lib/export";
 
 export default function ScriptsPage() {
   const [selectedScript, setSelectedScript] = useState<Script | null>(null);
@@ -338,15 +339,35 @@ export default function ScriptsPage() {
                           })}
                         </p>
                       </div>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleCopy(script)}
-                        data-testid={`button-copy-${script.id}`}
-                      >
-                        <Copy className="h-4 w-4 mr-2" />
-                        Copy
-                      </Button>
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleCopy(script)}
+                          data-testid={`button-copy-${script.id}`}
+                        >
+                          <Copy className="h-4 w-4 mr-2" />
+                          Copy
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => exportScriptAsPDF(script)}
+                          data-testid={`button-export-pdf-${script.id}`}
+                        >
+                          <Download className="h-4 w-4 mr-2" />
+                          PDF
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => exportScriptAsTXT(script)}
+                          data-testid={`button-export-txt-${script.id}`}
+                        >
+                          <FileText className="h-4 w-4 mr-2" />
+                          TXT
+                        </Button>
+                      </div>
                     </div>
                   </CardHeader>
                   <CardContent>
