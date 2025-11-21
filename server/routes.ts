@@ -148,7 +148,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const generatedReflection = await generateReflection(
         validatedData.period,
-        validatedData.focus
+        validatedData.focus,
+        validatedData.template
       );
       
       const reflection = await storage.addReflection(

@@ -106,19 +106,16 @@ Make it engaging, well-structured, and ready to use.`;
   }
 }
 
-export async function generateReflection(period: string, focus: string | undefined): Promise<{ title: string; wins: string[]; challenges: string[]; growth: string[]; tags: string[] }> {
+export async function generateReflection(period: string, focus: string | undefined, templateId?: string): Promise<{ title: string; wins: string[]; challenges: string[]; growth: string[]; tags: string[] }> {
   try {
-    const focusText = focus ? ` focusing on ${focus}` : "";
-    const prompt = `Generate a guided reflection for ${period}${focusText}.
+    const { getTemplateById, formatTemplatePrompt } = await import("../shared/reflectionTemplates.js");
+    const template = getTemplateById(templateId || "general");
+    
+    if (!template) {
+      throw new Error(`Template ${templateId} not found`);
+    }
 
-Return a JSON object with:
-- title: A reflective title for this period
-- wins: Array of 3-5 wins or achievements
-- challenges: Array of 3-5 challenges or obstacles faced
-- growth: Array of 3-5 growth areas or lessons learned
-- tags: Array of 3-5 relevant theme tags
-
-Make it thoughtful, specific, and encouraging.`;
+    const prompt = formatTemplatePrompt(template, period, focus);
 
     const response = await openai.chat.completions.create({
       model: "gpt-5.1", // the newest OpenAI model is "gpt-5" which was released August 7, 2025. do not change this unless explicitly requested by the user

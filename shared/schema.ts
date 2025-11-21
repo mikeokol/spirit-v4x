@@ -132,6 +132,7 @@ export const insertScriptSchema = z.object({
 export const insertReflectionSchema = z.object({
   period: z.string().min(3, "Period must be at least 3 characters"),
   focus: z.string().optional(),
+  template: z.string().default("general"),
 });
 
 export type InsertChatMessage = z.infer<typeof insertChatMessageSchema>;
