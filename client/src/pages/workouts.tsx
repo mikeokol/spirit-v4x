@@ -253,7 +253,7 @@ export default function WorkoutsPage() {
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-4">
-                    {selectedWorkout.exercises.map((exercise, index) => (
+                    {selectedWorkout.exercises?.map((exercise, index) => (
                       <div
                         key={index}
                         className="p-4 rounded-lg border border-card-border bg-card/50"
@@ -370,7 +370,7 @@ export default function WorkoutsPage() {
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-4">
-                      {workout.exercises.map((exercise, index) => (
+                      {workout.exercises?.map((exercise, index) => (
                         <div
                           key={index}
                           className="p-4 rounded-lg border border-card-border bg-card/50"

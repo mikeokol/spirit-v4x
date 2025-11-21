@@ -61,7 +61,12 @@ Make it practical and achievable.`;
       throw new Error("No response content");
     }
 
-    return JSON.parse(content);
+    const parsed = JSON.parse(content);
+    // Ensure exercises array exists
+    if (!parsed.exercises || !Array.isArray(parsed.exercises)) {
+      parsed.exercises = [];
+    }
+    return parsed;
   } catch (error) {
     console.error("Error generating workout:", error);
     throw new Error("Failed to generate workout");
