@@ -1,37 +1,95 @@
-import { type User, type InsertUser } from "@shared/schema";
+import {
+  type ChatMessage,
+  type InsertChatMessage,
+  type Workout,
+  type Script,
+  type Reflection,
+} from "@shared/schema";
 import { randomUUID } from "crypto";
 
-// modify the interface with any CRUD methods
-// you might need
-
 export interface IStorage {
-  getUser(id: string): Promise<User | undefined>;
-  getUserByUsername(username: string): Promise<User | undefined>;
-  createUser(user: InsertUser): Promise<User>;
+  // Chat methods
+  getChatMessages(): Promise<ChatMessage[]>;
+  addChatMessage(message: InsertChatMessage): Promise<ChatMessage>;
+  
+  // Workout methods
+  getWorkouts(): Promise<Workout[]>;
+  addWorkout(workout: Workout): Promise<Workout>;
+  
+  // Script methods
+  getScripts(): Promise<Script[]>;
+  addScript(script: Script): Promise<Script>;
+  
+  // Reflection methods
+  getReflections(): Promise<Reflection[]>;
+  addReflection(reflection: Reflection): Promise<Reflection>;
 }
 
 export class MemStorage implements IStorage {
-  private users: Map<string, User>;
+  private chatMessages: Map<string, ChatMessage>;
+  private workouts: Map<string, Workout>;
+  private scripts: Map<string, Script>;
+  private reflections: Map<string, Reflection>;
 
   constructor() {
-    this.users = new Map();
+    this.chatMessages = new Map();
+    this.workouts = new Map();
+    this.scripts = new Map();
+    this.reflections = new Map();
   }
 
-  async getUser(id: string): Promise<User | undefined> {
-    return this.users.get(id);
-  }
-
-  async getUserByUsername(username: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(
-      (user) => user.username === username,
+  // Chat methods
+  async getChatMessages(): Promise<ChatMessage[]> {
+    return Array.from(this.chatMessages.values()).sort(
+      (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
     );
   }
 
-  async createUser(insertUser: InsertUser): Promise<User> {
+  async addChatMessage(insertMessage: InsertChatMessage): Promise<ChatMessage> {
     const id = randomUUID();
-    const user: User = { ...insertUser, id };
-    this.users.set(id, user);
-    return user;
+    const message: ChatMessage = {
+      ...insertMessage,
+      id,
+      timestamp: new Date().toISOString(),
+    };
+    this.chatMessages.set(id, message);
+    return message;
+  }
+
+  // Workout methods
+  async getWorkouts(): Promise<Workout[]> {
+    return Array.from(this.workouts.values()).sort(
+      (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+    );
+  }
+
+  async addWorkout(workout: Workout): Promise<Workout> {
+    this.workouts.set(workout.id, workout);
+    return workout;
+  }
+
+  // Script methods
+  async getScripts(): Promise<Script[]> {
+    return Array.from(this.scripts.values()).sort(
+      (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+    );
+  }
+
+  async addScript(script: Script): Promise<Script> {
+    this.scripts.set(script.id, script);
+    return script;
+  }
+
+  // Reflection methods
+  async getReflections(): Promise<Reflection[]> {
+    return Array.from(this.reflections.values()).sort(
+      (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+    );
+  }
+
+  async addReflection(reflection: Reflection): Promise<Reflection> {
+    this.reflections.set(reflection.id, reflection);
+    return reflection;
   }
 }
 
