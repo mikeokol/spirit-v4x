@@ -1,17 +1,13 @@
-// controllers/chatController.js — Unified Sanctuary Router (Spirit v5.1)
+// chatController.js — Spirit v5.1 Showcase Brain
 
-import { classifyIntent } from "../services/classifier.js";
-import { generateReflection } from "./reflectionController.js";
+import { classifyIntent } from "../utils/classifyIntent.js";
+import { spiritVoice } from "../utils/spiritVoice.js";
 
 export const chatController = async (req, res) => {
   try {
-    const { user_id, message } = req.body;
-
-    if (!user_id || !message) {
-      return res.status(400).json({
-        ok: false,
-        error: "Missing user_id or message"
-      });
+    const { message } = req.body;
+    if (!message) {
+      return res.status(400).json({ ok: false, error: "Missing message" });
     }
 
     const intent = classifyIntent(message);
@@ -21,33 +17,45 @@ export const chatController = async (req, res) => {
         return res.json({
           ok: true,
           mode: "fitness",
-          next: "/fitness/profile or /fitness/session",
-          note: "Detected fitness intent"
+          reply: spiritVoice("fitness", message)
         });
 
       case "creator":
         return res.json({
           ok: true,
           mode: "creator",
-          next: "/creator/script or /creator/profile",
-          note: "Detected creator intent"
+          reply: spiritVoice("creator", message)
+        });
+
+      case "hybrid":
+        return res.json({
+          ok: true,
+          mode: "hybrid",
+          reply: spiritVoice("hybrid", message)
+        });
+
+      case "live":
+        return res.json({
+          ok: true,
+          mode: "live",
+          reply: spiritVoice("live", message)
         });
 
       case "reflection":
-        req.body.intention = message;
-        return generateReflection(req, res);
+        return res.json({
+          ok: true,
+          mode: "reflection",
+          reply: spiritVoice("reflection", message)
+        });
 
       default:
         return res.json({
           ok: true,
           mode: "general",
-          reply: "State your intention. Spirit is present."
+          reply: spiritVoice("general", message)
         });
     }
   } catch (err) {
-    res.status(500).json({
-      ok: false,
-      error: err.message
-    });
+    res.status(500).json({ ok: false, error: err.message });
   }
 };
