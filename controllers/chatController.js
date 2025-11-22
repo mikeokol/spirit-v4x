@@ -1,14 +1,17 @@
-// chatController.js — Spirit v5.1 Showcase Brain
+// controllers/chatController.js — Spirit v5.1 Showcase Brain
 
 import { classifyIntent } from "../utils/classifyIntent.js";
 import { spiritVoice } from "../utils/spiritVoice.js";
-import { classifyIntent } from "../utils/classifyIntent.js";
 
 export const chatController = async (req, res) => {
   try {
     const { message } = req.body;
+
     if (!message) {
-      return res.status(400).json({ ok: false, error: "Missing message" });
+      return res.status(400).json({
+        ok: false,
+        error: "Missing message"
+      });
     }
 
     const intent = classifyIntent(message);
@@ -57,6 +60,9 @@ export const chatController = async (req, res) => {
         });
     }
   } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
+    res.status(500).json({
+      ok: false,
+      error: err.message
+    });
   }
 };
