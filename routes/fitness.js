@@ -1,20 +1,12 @@
-// fitness.js — v5.1 Fitness API Routes
+// routes/fitness.js — Spirit v5.1 Showcase Launch
+// Single-endpoint Fitness Engine for rapid testing & clean UX
 
 import express from "express";
-import {
-  setFitnessProfile,
-  getFitnessBlock,
-  generateFitnessBlock,
-  getSessionForDay,
-  logSession
-} from "../controllers/fitnessController.js";
+import { fitnessController } from "../controllers/fitnessController.js";
 
 const router = express.Router();
 
-router.post("/profile", setFitnessProfile);
-router.get("/block", getFitnessBlock);
-router.post("/block/regenerate", generateFitnessBlock);
-router.get("/session/:day", getSessionForDay);
-router.post("/session/log", logSession);
+// All fitness logic goes through one clean endpoint
+router.post("/", fitnessController);
 
 export default router;
