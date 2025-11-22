@@ -2,6 +2,7 @@
 
 import { classifyIntent } from "../utils/classifyIntent.js";
 import { spiritVoice } from "../utils/spiritVoice.js";
+import { classifyIntent } from "../utils/classifyIntent.js";
 
 export const chatController = async (req, res) => {
   try {
