@@ -1,16 +1,11 @@
-// creator.js — v5.1 Creator API Routes
+// routes/creator.js — Spirit v5.1 Showcase Launch
+// Single-endpoint Creator Engine for rapid testing
 
 import express from "express";
-import {
-  setCreatorProfile,
-  generateCreatorScript,
-  generateContentSprint
-} from "../controllers/creatorController.js";
+import { creatorController } from "../controllers/creatorController.js";
 
 const router = express.Router();
 
-router.post("/profile", setCreatorProfile);
-router.post("/script", generateCreatorScript);
-router.post("/sprint", generateContentSprint);
+router.post("/", creatorController);
 
 export default router;
