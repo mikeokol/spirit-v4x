@@ -1,40 +1,70 @@
-// controller.js — Trinity v7 Cognitive Engine Controller
-// Purpose: interpret user prompt → taskType for Planner
+// engine/controller.js — Unified Spirit v7.1 engine
 
-export function spiritController(prompt = "") {
-  const text = prompt.toLowerCase().trim();
+import { loadUserMemory, saveUserMemory } from "./memory.js";
+import { runPlanner } from "./planner.js";
+import { runExecutor } from "./executor.js";
+import { runCritic } from "./critic.js";
 
-  // --- Explicit Command Patterns ---
-  if (text.includes("workout") || text.includes("gym") || text.includes("training")) {
-    return "fitness_task";
-  }
+/**
+ * Main orchestrator for Spirit v7.1
+ */
+export async function runSpiritEngine({ userId, message, mode, taskType }) {
+  const safeMode = mode || "sanctuary";
+  const safeTask = taskType || "sanctuary_chat";
 
-  if (text.includes("script") || text.includes("content") || text.includes("creator")) {
-    return "creator_task";
-  }
+  // 1) Load memory
+  const memory = await loadUserMemory(userId);
 
-  if (text.includes("reflect") || text.includes("journal") || text.includes("insight")) {
-    return "reflection_task";
-  }
+  // 2) Planner
+  const plan = await runPlanner({
+    userId,
+    message,
+    mode: safeMode,
+    taskType: safeTask,
+    memory,
+  });
 
-  if (text.includes("live session") || text.includes("coach me") || text.includes("next set")) {
-    return "live_session_task";
-  }
+  // 3) Executor
+  const reply = await runExecutor({
+    userId,
+    message,
+    plan,
+    memory,
+    mode: safeMode,
+    taskType: safeTask,
+  });
 
-  if (text.includes("analytics") || text.includes("stats") || text.includes("progress")) {
-    return "analytics_task";
-  }
+  // 4) Critic
+  const review = await runCritic({
+    reply,
+    plan,
+    mode: safeMode,
+    taskType: safeTask,
+  });
 
-  if (text.includes("hybrid") || text.includes("combine") || text.includes("mix")) {
-    return "hybrid_task";
-  }
+  // 5) Memory patch
+  const patch = {
+    lastModes: Array.from(
+      new Set([...(memory.lastModes || []), safeMode])
+    ).slice(-10),
+    lastTaskType: safeTask,
+    lastReplySummary:
+      typeof reply === "string" ? reply.slice(0, 200) : null,
+  };
 
-  // --- Generic Conversational Input ---
-  // Default for typical chat interactions (Sanctuary)
-  if (prompt.length <= 250) {
-    return "sanctuary_chat";
-  }
+  if (safeTask === "workout_plan") patch.lastWorkoutPlan = reply;
+  if (safeTask === "creator_script") patch.lastCreatorScript = reply;
+  if (safeTask === "reflection_prompt") patch.lastReflection = reply;
+  if (safeTask === "hybrid_plan") patch.lastHybridPlan = reply;
 
-  // --- Long-Form / Reasoning / Planning ---
-  return "analysis_task";
+  await saveUserMemory(userId, patch);
+
+  return {
+    ok: true,
+    reply,
+    plan,
+    review,
+    taskType: safeTask,
+    mode: safeMode,
+  };
 }

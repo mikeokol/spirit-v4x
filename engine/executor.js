@@ -1,48 +1,80 @@
-// engine/executor.js — Spirit v7 Cognitive Engine Executor
+// engine/executor.js — Spirit v7.1 Executor (chat.completions, plain text)
 
-import fs from "fs";
-import { openai } from "../services/openai.js";
-import { runTool } from "./tools/runTool.js";
+import { getClient } from "../services/openai.js";
 
-// Load system prompt for executor
-const executorSystemPrompt = fs.readFileSync("./prompts/executor.txt", "utf8");
+function modePersona(mode) {
+  switch (mode) {
+    case "fitness":
+      return "You are Spirit in FITNESS mode: elite, direct, but supportive. You design practical, safe, progressive plans.";
+    case "creator":
+      return "You are Spirit in CREATOR mode: sharp, structured, focused on hooks, story, and clarity.";
+    case "reflection":
+      return "You are Spirit in REFLECTION mode: calm, probing, insight-driven. You ask good questions and help the user see patterns.";
+    case "hybrid":
+      return "You are Spirit in HYBRID mode: you blend training, mindset, and creator output into one coherent plan.";
+    case "live":
+      return "You are Spirit in LIVE coaching mode (Elite Founder): high-intensity but grounded, pushing the user toward concrete action.";
+    case "sanctuary":
+    default:
+      return "You are Spirit in SANCTUARY mode: calm, precise, protective, and honest. You give clear next steps without fluff.";
+  }
+}
 
-export async function spiritExecutor(plan, memory, tools) {
-  const safePlan = plan || {};
-  const steps = Array.isArray(safePlan.steps) ? safePlan.steps : [];
-  const safeTools = tools || {};
-  const results = [];
+/**
+ * Executor: follows the plan + memory and returns ONE unified text reply.
+ * No JSON out, so it cannot break from parsing.
+ */
+export async function runExecutor({
+  userId,
+  message,
+  plan,
+  memory,
+  mode,
+  taskType,
+}) {
+  const client = getClient();
 
-  for (const step of steps) {
-    const stepPayload = {
-      step,
-      memory: memory || {},
-      toolsAvailable: Object.keys(safeTools),
-    };
+  const systemContent = `
+You are the EXECUTOR module of Spirit v7.1.
 
-    const result = await openai.chat.completions.create({
-      model: "gpt-5.1",
-      messages: [
-        { role: "system", content: executorSystemPrompt },
-        {
-          role: "user",
-          content: JSON.stringify(stepPayload, null, 2),
-        },
-      ],
-    });
+${modePersona(mode)}
 
-    const output = result.choices?.[0]?.message?.content ?? "";
+Rules:
+- Follow the provided plan steps as guidance, but you may compress or adapt them.
+- Output **ONE** unified answer as plain text (no JSON, no markdown fences required).
+- Keep it **practical, specific, and grounded**.
+- Respect the taskType: ${taskType}.
+- If the plan has id "fallback", ignore its structure and respond directly to the user in the best possible way.
+`;
 
-    // Tool call convention: model returns a JSON string containing TOOL_CALL
-    if (output.includes("TOOL_CALL")) {
-      const toolResult = await runTool(output, safeTools);
-      results.push(toolResult);
-      continue;
-    }
+  const userContent = `
+UserId: ${userId}
+Mode: ${mode}
+TaskType: ${taskType}
 
-    // Otherwise it's a normal text result
-    results.push(output);
+User message:
+${message}
+
+Plan object:
+${JSON.stringify(plan ?? {}, null, 2)}
+
+Memory snapshot:
+${JSON.stringify(memory ?? {}, null, 2)}
+`;
+
+  const completion = await client.chat.completions.create({
+    model: "gpt-4.1-mini",
+    messages: [
+      { role: "system", content: systemContent },
+      { role: "user", content: userContent },
+    ],
+    temperature: 0.45,
+  });
+
+  const reply = completion.choices?.[0]?.message?.content?.trim();
+  if (!reply) {
+    return "Executor fallback: model returned no content. Try again or adjust your request.";
   }
 
-  return results.join("\n\n");
+  return reply;
 }

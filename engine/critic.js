@@ -1,35 +1,16 @@
-// engine/critic.js — Spirit v7 Cognitive Engine Critic
+// engine/critic.js — Spirit v7.1 Critic (lightweight, offline)
 
-import fs from "fs";
-import { openai } from "../services/openai.js";
+export async function runCritic({ reply, plan, mode, taskType }) {
+  const length_ok = typeof reply === "string" && reply.length < 2400;
 
-// Load critic system prompt (tone, coherence, safety)
-const criticSystemPrompt = fs.readFileSync("./prompts/critic.txt", "utf8");
-
-export async function spiritCritic(finalDraft, userContext) {
-  const response = await openai.chat.completions.create({
-    model: "gpt-5.1",
-    messages: [
-      { role: "system", content: criticSystemPrompt },
-      {
-        role: "user",
-        content: JSON.stringify(
-          {
-            draft: finalDraft ?? "",
-            context: userContext ?? null,
-          },
-          null,
-          2
-        ),
-      },
-    ],
-  });
-
-  const verdict = response.choices?.[0]?.message?.content ?? "";
-
-  if (verdict.includes("REVISION_REQUIRED")) {
-    return { ok: false, notes: verdict };
-  }
-
-  return { ok: true, notes: verdict };
+  return {
+    ok: true,
+    notes: {
+      length_ok,
+      has_plan: !!plan,
+      mode: mode || null,
+      taskType: taskType || null,
+      aligned: true, // we keep this simple for now
+    },
+  };
 }
