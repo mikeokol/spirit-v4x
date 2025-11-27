@@ -1,81 +1,48 @@
-// executor.js — Trinity v7 Cognitive Engine Executor
-// Purpose: execute planner steps into coherent final output.
+// engine/executor.js — Spirit v7 Cognitive Engine Executor
 
+import fs from "fs";
 import { openai } from "../services/openai.js";
+import { runTool } from "./tools/runTool.js";
 
-export async function spiritExecutor(plan, execContext) {
-  const { prompt, memory, tools, tone, context } = execContext;
+// Load system prompt for executor
+const executorSystemPrompt = fs.readFileSync("./prompts/executor.txt", "utf8");
 
+export async function spiritExecutor(plan, memory, tools) {
+  const safePlan = plan || {};
+  const steps = Array.isArray(safePlan.steps) ? safePlan.steps : [];
+  const safeTools = tools || {};
   const results = [];
 
-  for (const step of plan.steps) {
-    const query = `
-You are the EXECUTOR of the Trinity v7 Cognitive Engine.
+  for (const step of steps) {
+    const stepPayload = {
+      step,
+      memory: memory || {},
+      toolsAvailable: Object.keys(safeTools),
+    };
 
-Task Type: ${plan.taskType}
-Step ID: ${step.id}
-Action: ${step.action}
-Detail: ${step.detail}
-
-Prompt: ${prompt}
-Tone: ${tone}
-Context: ${JSON.stringify(context)}
-Memory Summary: ${JSON.stringify(memory)}
-
-If this step requires a tool, respond ONLY with:
-{
-  "tool": "<toolName>",
-  "input": { ... }
-}
-
-Otherwise, respond ONLY with:
-{
-  "text": "..."
-}
-`;
-
-    const response = await openai.chat.completions.create({
-      model: "gpt-4.1-mini",
+    const result = await openai.chat.completions.create({
+      model: "gpt-5.1",
       messages: [
-        { role: "system", content: "You are the executor of Trinity v7." },
-        { role: "user", content: query }
-      ]
+        { role: "system", content: executorSystemPrompt },
+        {
+          role: "user",
+          content: JSON.stringify(stepPayload, null, 2),
+        },
+      ],
     });
 
-    let raw = response.choices[0].message.content.trim();
+    const output = result.choices?.[0]?.message?.content ?? "";
 
-    // Fail-safe parse
-    let parsed;
-    try {
-      parsed = JSON.parse(raw);
-    } catch (err) {
-      console.error("Executor JSON error:", raw);
-      parsed = { text: raw };
-    }
-
-    // If model triggered a tool
-    if (parsed.tool) {
-      const toolFunc = tools[parsed.tool];
-      if (toolFunc) {
-        const result = await toolFunc(parsed.input, memory, context);
-        results.push(result);
-        continue;
-      } else {
-        results.push(`[ERROR: Unknown tool '${parsed.tool}']`);
-        continue;
-      }
-    }
-
-    // Plain text result
-    if (parsed.text) {
-      results.push(parsed.text);
+    // Tool call convention: model returns a JSON string containing TOOL_CALL
+    if (output.includes("TOOL_CALL")) {
+      const toolResult = await runTool(output, safeTools);
+      results.push(toolResult);
       continue;
     }
 
-    // Fallback
-    results.push(raw);
+    // Otherwise it's a normal text result
+    results.push(output);
   }
 
-  // Join all step outputs
   return results.join("\n\n");
 }

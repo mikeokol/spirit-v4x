@@ -1,56 +1,42 @@
-// planner.js — Trinity v7 Cognitive Engine Planner
-// Purpose: Convert taskType + prompt into a structured plan for executor.
+// engine/planner.js — Spirit v7 Cognitive Engine Planner
 
+import fs from "fs";
 import { openai } from "../services/openai.js";
 
-export async function spiritPlanner(taskType, prompt, memory, context = {}) {
-  const planningQuery = `
-You are the PLANNER of the Trinity v7 Cognitive Engine.
-Your job: break the task into a short JSON plan.
+// Load planner system prompt
+const plannerSystemPrompt = fs.readFileSync("./prompts/planner.txt", "utf8");
 
-Follow this schema:
-{
-  "taskType": "...",
-  "steps": [
-    { "id": "step-1", "action": "explain", "detail": "..." },
-    { "id": "step-2", "action": "process", "detail": "..." },
-    { "id": "step-3", "action": "finalize", "detail": "..." }
-  ],
-  "checks": [
-    "Is output aligned with taskType?",
-    "Is memory context considered?",
-    "Is final output coherent and safe?"
-  ]
-}
-
+export async function spiritPlanner(taskType, payload) {
+  const prompt = `
 Task Type: ${taskType}
-Prompt: ${prompt}
-Memory Summary: ${JSON.stringify(memory)}
-Context: ${JSON.stringify(context)}
-
-ONLY RETURN VALID JSON. NOTHING ELSE.
-`;
+Payload: ${JSON.stringify(payload)}
+  `.trim();
 
   const response = await openai.chat.completions.create({
-    model: "gpt-4.1-mini",
+    model: "gpt-5.1",
     messages: [
-      { role: "system", content: "You are the structured planner of Trinity v7." },
-      { role: "user", content: planningQuery }
-    ]
+      { role: "system", content: plannerSystemPrompt },
+      { role: "user", content: prompt },
+    ],
   });
 
-  // Extract raw text
-  const raw = response.choices[0].message.content.trim();
+  const raw = response.choices?.[0]?.message?.content ?? "{}";
 
-  // Fail-safe parsing
   try {
     return JSON.parse(raw);
   } catch (err) {
-    console.error("Planner JSON error:", raw);
+    console.error("Planner JSON parse error:", err, raw);
+    // Safe fallback plan
     return {
       taskType,
-      steps: [{ id: "fallback", action: "respond", detail: prompt }],
-      checks: ["Failed to parse plan — using fallback."]
+      steps: [
+        {
+          id: "fallback",
+          action: "respond",
+          detail: "Generate a direct, helpful response to the user.",
+        },
+      ],
+      checks: [],
     };
   }
 }

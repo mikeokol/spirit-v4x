@@ -1,47 +1,43 @@
-// runTool.js — Trinity v7 Tool Execution Layer
-// Executes tool calls detected by Executor
+// engine/tools/runTool.js — Executes TOOL_CALL instructions from the Executor
 
-export async function runTool(call, tools, memory, context) {
+export async function runTool(toolCall, tools) {
   let parsed;
 
   try {
-    parsed = typeof call === "string" ? JSON.parse(call) : call;
+    parsed = JSON.parse(toolCall);
   } catch (err) {
     return {
       error: "INVALID_TOOL_CALL_JSON",
-      raw: call,
-      details: err.message
+      details: err.message,
+      raw: toolCall,
     };
   }
 
-  if (!parsed.tool) {
+  if (!parsed.TOOL_CALL) {
     return {
       error: "MALFORMED_TOOL_CALL",
-      parsed
+      details: parsed,
     };
   }
 
-  const { tool, input } = parsed;
+  const { tool, input } = parsed.TOOL_CALL;
+  const registry = tools || {};
 
-  const toolFn = tools[tool];
-  if (!toolFn) {
+  if (!registry[tool]) {
     return {
       error: "UNKNOWN_TOOL",
       tool,
-      available: Object.keys(tools)
+      available: Object.keys(registry),
     };
   }
 
   try {
-    // All Trinity v7 tools follow signature:
-    // toolFn(input, memory, context)
-    const result = await toolFn(input, memory, context);
-    return { tool, result };
+    return await registry[tool](input);
   } catch (err) {
     return {
       error: "TOOL_EXECUTION_FAILED",
       tool,
-      details: err.stack || err.message
+      details: err.message,
     };
   }
 }

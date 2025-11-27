@@ -1,48 +1,35 @@
-// critic.js — Trinity v7 Cognitive Engine Critic
-// Purpose: validate executor output with structured JSON feedback
+// engine/critic.js — Spirit v7 Cognitive Engine Critic
 
+import fs from "fs";
 import { openai } from "../services/openai.js";
 
-export async function spiritCritic(output, plan, memory) {
-  const query = `
-You are the CRITIC module of the Trinity v7 Cognitive Engine.
+// Load critic system prompt (tone, coherence, safety)
+const criticSystemPrompt = fs.readFileSync("./prompts/critic.txt", "utf8");
 
-Your job is to evaluate whether the final output fully satisfies the plan,
-and whether it is coherent, safe, on-topic, and aligned with the task type.
-
-Return strictly in JSON:
-
-{
-  "ok": true | false,
-  "notes": "explanation if revision needed"
-}
-
-Evaluation Context:
-- Task Type: ${plan.taskType}
-- Steps: ${JSON.stringify(plan.steps)}
-- Output: ${JSON.stringify(output)}
-- Memory Snapshot: ${JSON.stringify(memory)}
-`;
-
+export async function spiritCritic(finalDraft, userContext) {
   const response = await openai.chat.completions.create({
-    model: "gpt-4.1-mini",
+    model: "gpt-5.1",
     messages: [
-      { role: "system", content: "You are the strict critic of Trinity v7." },
-      { role: "user", content: query }
-    ]
+      { role: "system", content: criticSystemPrompt },
+      {
+        role: "user",
+        content: JSON.stringify(
+          {
+            draft: finalDraft ?? "",
+            context: userContext ?? null,
+          },
+          null,
+          2
+        ),
+      },
+    ],
   });
 
-  const raw = response.choices[0].message.content.trim();
+  const verdict = response.choices?.[0]?.message?.content ?? "";
 
-  // Parse safely
-  try {
-    const parsed = JSON.parse(raw);
-    return parsed;
-  } catch (err) {
-    console.error("Critic JSON parse error:", raw);
-    return {
-      ok: true,
-      notes: "Critic failed to parse JSON; allowing output."
-    };
+  if (verdict.includes("REVISION_REQUIRED")) {
+    return { ok: false, notes: verdict };
   }
+
+  return { ok: true, notes: verdict };
 }
