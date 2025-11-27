@@ -5,7 +5,7 @@ import { spiritController } from "../engine/controller.js";
 import { spiritPlanner } from "../engine/planner.js";
 import { spiritExecutor } from "../engine/executor.js";
 import { spiritCritic } from "../engine/critic.js";
-import { pullUserMemory, saveMemoryEntry } from "../engine/memory.js";
+import { pullUserMemory } from "../engine/memory.js";
 
 // Tools
 import { workoutBuilder } from "../engine/tools/workoutBuilder.js";
@@ -15,82 +15,73 @@ import { analyticsTools } from "../engine/tools/analyticsTools.js";
 
 const router = express.Router();
 
+// SIMPLE FALLBACK CHAT
+async function simpleSpiritChat(message) {
+  return `I hear you. What direction do you want to explore?`;
+}
+
 router.post("/", async (req, res) => {
   try {
-    const { prompt, userId, taskType, context = {}, tone = "default" } = req.body;
+    const { prompt, message, mode, userId, taskType, tone, context } = req.body;
 
-    if (!prompt || !userId) {
-      return res.status(400).json({
-        ok: false,
-        error: "Missing required fields: prompt, userId"
-      });
+    // Handle aliasing (prompt vs message)
+    const input = message ?? prompt;
+    if (!input) {
+      return res.status(400).json({ error: "No message provided." });
     }
 
-    // 1) CONTROLLER — interpret prompt → task
-    const resolvedTask = taskType || spiritController(prompt);
+    // CONTROLLER
+    const resolvedTask = taskType ?? spiritController(input, mode);
 
-    // 2) MEMORY — get last reflections/workouts/creator logs
+    // MEMORY
     const memory = await pullUserMemory(userId);
 
-    // 3) PLANNER — build reasoning plan
-    const plan = await spiritPlanner(
-      resolvedTask,
-      prompt,
-      memory,
-      context
-    );
+    // SIMPLE CHAT
+    if (resolvedTask === "simple_chat") {
+      const reply = await simpleSpiritChat(input);
+      return res.json({ reply });
+    }
 
-    // 4) EXECUTOR — run task using toolbox
-    const output = await spiritExecutor(plan, {
-      prompt,
-      userId,
+    // PLANNER
+    const plan = await spiritPlanner(resolvedTask, {
+      message: input,
+      mode,
       tone,
-      context,
       memory,
-      tools: {
-        workoutBuilder,
-        creatorTools,
-        reflectionTools,
-        analyticsTools
-      }
+      userId,
+      context,
     });
 
-    // 5) CRITIC — validate final answer
-    const review = await spiritCritic(output, plan, memory);
-
-    // Optional memory write-back
-    await saveMemoryEntry(userId, {
-      prompt,
-      output,
-      taskType: resolvedTask,
-      ts: new Date().toISOString()
+    // EXECUTOR — MUST PASS TOOLS
+    const draft = await spiritExecutor(plan, memory, {
+      workoutBuilder,
+      creatorTools,
+      reflectionTools,
+      analyticsTools,
     });
 
-    // If critic says it's ok
-    if (review.ok) {
+    // CRITIC
+    const review = await spiritCritic(draft, memory);
+
+    if (!review.ok) {
       return res.json({
-        ok: true,
-        output,
-        plan,
-        review
+        reply: draft,
+        notes: review.notes,
+        status: "revision_requested",
       });
     }
 
-    // If critic not satisfied
     return res.json({
-      ok: true,
-      output,
+      reply: draft,
       plan,
       review,
-      status: "revision"
     });
 
   } catch (err) {
     console.error("Spirit v7 Engine Error:", err);
     return res.status(500).json({
-      ok: false,
-      error: "Spirit v7 engine failed.",
-      details: String(err)
+      error: "Spirit engine failed.",
+      details: String(err),
     });
   }
 });
