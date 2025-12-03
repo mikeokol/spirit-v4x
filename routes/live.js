@@ -1,19 +1,24 @@
-// routes/live.js — Live Elite Founder coaching sessions
+// routes/live.js — Spirit v7.2 Live Coaching Route
 import express from "express";
 import { v4 as uuidv4 } from "uuid";
 
-import { runSpiritEngine } from "../engine/controller.js";
-import { recordLiveEvent } from "../engine/memory.js";
+import {
+  loadUserMemory,
+  saveUserMemory,
+  recordLiveEvent
+} from "../engine/memory.js";
+
+import { runLiveCoachTurn } from "../engine/liveCoach.js";
 
 const router = express.Router();
 
-// In-memory map of active live coaching sessions.
-// Key: sessionId -> { userId, startedAt, lastMessageAt }
+// In-memory active sessions
+// sessionId -> { userId, startedAt, lastMessageAt }
 const activeSessions = new Map();
 
 /**
  * POST /live/start
- * Body: { userId: string }
+ * Body: { userId }
  */
 router.post("/start", async (req, res) => {
   try {
@@ -21,7 +26,7 @@ router.post("/start", async (req, res) => {
     if (!userId) {
       return res.status(400).json({
         ok: false,
-        error: "Missing userId in request body.",
+        error: "Missing userId.",
       });
     }
 
@@ -34,13 +39,11 @@ router.post("/start", async (req, res) => {
       lastMessageAt: now,
     });
 
-    // Persist event to memory (best-effort; non-blocking for UX)
+    // Memory update (non-blocking)
     recordLiveEvent(userId, {
       type: "session_started",
       sessionId,
-    }).catch((err) => {
-      console.warn("[live] recordLiveEvent(session_started) failed:", err);
-    });
+    }).catch(console.warn);
 
     return res.json({
       ok: true,
@@ -48,8 +51,8 @@ router.post("/start", async (req, res) => {
       message: "Live session initiated. Elite Founder mode engaged.",
     });
   } catch (err) {
-    console.error("[live] /start error:", err);
-    return res.status(500).json({
+    console.error("[live/start]", err);
+    res.status(500).json({
       ok: false,
       error: "Failed to start live session.",
     });
@@ -58,7 +61,7 @@ router.post("/start", async (req, res) => {
 
 /**
  * POST /live/message
- * Body: { userId: string, sessionId: string, message: string }
+ * Body: { userId, sessionId, message }
  */
 router.post("/message", async (req, res) => {
   try {
@@ -67,7 +70,7 @@ router.post("/message", async (req, res) => {
     if (!userId || !sessionId || !message) {
       return res.status(400).json({
         ok: false,
-        error: "Missing userId, sessionId, or message in request body.",
+        error: "Missing userId, sessionId, or message.",
       });
     }
 
@@ -81,35 +84,31 @@ router.post("/message", async (req, res) => {
 
     session.lastMessageAt = new Date().toISOString();
 
-    const result = await runSpiritEngine({
+    // Run live engine for this turn
+    const result = await runLiveCoachTurn({
       userId,
+      sessionId,
       message,
-      mode: "live",
-      taskType: "live_coaching",
     });
 
-    const reply =
-      typeof result?.reply === "string"
-        ? result.reply
-        : "Session active, but no reply generated.";
+    const reply = result.reply || "Session active, but no reply generated.";
 
-    // Persist coach turn
+    // Memory update (non-blocking)
     recordLiveEvent(userId, {
       type: "coach_turn",
       sessionId,
       reply,
-    }).catch((err) => {
-      console.warn("[live] recordLiveEvent(coach_turn) failed:", err);
-    });
+    }).catch(console.warn);
 
-    return res.json({
+    res.json({
       ok: true,
       sessionId,
       reply,
+      state: result.state,
     });
   } catch (err) {
-    console.error("[live] /message error:", err);
-    return res.status(500).json({
+    console.error("[live/message]", err);
+    res.status(500).json({
       ok: false,
       error: "Live coaching message failed.",
     });
@@ -118,7 +117,6 @@ router.post("/message", async (req, res) => {
 
 /**
  * POST /live/end
- * Body: { userId: string, sessionId: string }
  */
 router.post("/end", async (req, res) => {
   try {
@@ -127,7 +125,7 @@ router.post("/end", async (req, res) => {
     if (!userId || !sessionId) {
       return res.status(400).json({
         ok: false,
-        error: "Missing userId or sessionId in request body.",
+        error: "Missing userId or sessionId.",
       });
     }
 
@@ -135,7 +133,7 @@ router.post("/end", async (req, res) => {
     if (!session || session.userId !== userId) {
       return res.status(400).json({
         ok: false,
-        error: "No active live session.",
+        error: "No active session.",
       });
     }
 
@@ -144,19 +142,17 @@ router.post("/end", async (req, res) => {
     recordLiveEvent(userId, {
       type: "session_ended",
       sessionId,
-    }).catch((err) => {
-      console.warn("[live] recordLiveEvent(session_ended) failed:", err);
-    });
+    }).catch(console.warn);
 
     return res.json({
       ok: true,
-      message: "Session ended. Spirit will rest until called again.",
+      message: "Live session ended. Spirit rests.",
     });
   } catch (err) {
-    console.error("[live] /end error:", err);
-    return res.status(500).json({
+    console.error("[live/end]", err);
+    res.status(500).json({
       ok: false,
-      error: "Failed to end live session.",
+      error: "Failed to end session.",
     });
   }
 });
