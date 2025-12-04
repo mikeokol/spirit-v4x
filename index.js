@@ -1,74 +1,46 @@
-// index.js — Spirit v7 Backend (Unified Engine + Live Sessions)
+// index.js
+// Spirit v7 — Production Entrypoint
 
 import express from "express";
-import bodyParser from "body-parser";
 import cors from "cors";
-import "dotenv/config";
 
 import spiritRouter from "./routes/spirit.js";
 import liveRouter from "./routes/live.js";
+import debugRoutes from "./routes/debug.js";
 
-const app = express();
+import { hasSupabase } from "./services/supabase.js";
 
-// =============================================================
-// GLOBAL MIDDLEWARE
-// =============================================================
-app.use(
-  cors({
-    origin: "*",
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  })
-);
-
-app.use(
-  bodyParser.json({
-    limit: "5mb",
-    strict: true,
-  })
-);
-
-// =============================================================
-// ROUTES
-// =============================================================
-
-// Unified Cognitive Engine
-app.use("/spirit", spiritRouter);
-
-// Live coaching sessions (start / message / end)
-app.use("/live", liveRouter);
-
-// Root health
-app.get("/", (_req, res) => {
-  res.json({
-    ok: true,
-    engine: "Spirit v7 Cognitive Engine",
-    status: "online",
-    message: "You have arrived. Breathe. Spirit v7 is awake.",
-    endpoints: {
-      unified: "/spirit",
-      live: {
-        start: "/live/start",
-        message: "/live/message",
-        end: "/live/end",
-      },
-    },
-  });
-});
-
-// 404 fallback
-app.use((req, res) => {
-  res.status(404).json({
-    ok: false,
-    error: "Route not found.",
-    path: req.originalUrl,
-  });
-});
-
-// =============================================================
-// SERVER STARTUP
-// =============================================================
 const PORT = process.env.PORT || 5000;
 
+// ----------------------------------------------
+// INITIALIZE APP
+// ----------------------------------------------
+const app = express();
+
+app.use(cors());
+app.use(express.json({ limit: "2mb" }));
+
+// ----------------------------------------------
+// HEALTH CHECK
+// ----------------------------------------------
+app.get("/", (req, res) => {
+  res.json({
+    ok: true,
+    service: "Spirit v7",
+    supabase: hasSupabase ? "connected" : "local-only",
+  });
+});
+
+// ----------------------------------------------
+// ROUTES
+// ----------------------------------------------
+app.use("/spirit", spiritRouter);
+app.use("/live", liveRouter);
+app.use("/debug", debugRoutes);
+
+// ----------------------------------------------
+// START SERVER
+// ----------------------------------------------
 app.listen(PORT, () => {
-  console.log(`✨ Spirit v7 Cognitive Engine running on port ${PORT}`);
+  console.log("✨ Spirit v7 Cognitive Engine running on port", PORT);
 });

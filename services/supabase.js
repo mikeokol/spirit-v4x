@@ -1,26 +1,51 @@
 // services/supabase.js
-import { createClient } from "@supabase/supabase-js";
+// Final Stable Version — Spirit v7
 
-let supabase = null;
+import { createClient } from "@supabase/supabase-js";
 
 const url = process.env.SUPABASE_URL;
 const key =
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
+  process.env.SUPABASE_SERVICE_ROLE_KEY ||
+  process.env.SUPABASE_ANON_KEY;
 
-if (!url || !key) {
-  console.warn(
-    "[supabase] Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY/ANON_KEY. " +
-      "Spirit v7 will use in-memory-only memory. Fine for dev; configure Supabase for persistence."
-  );
-} else {
-  supabase = createClient(url, key, {
-    auth: {
-      persistSession: false,
-    },
-  });
-  console.log("[supabase] Client initialised.");
-}
+// ----------------------------------------------
+// Detect if Supabase is available
+// ----------------------------------------------
+export const hasSupabase = Boolean(url && key);
 
-export function getSupabaseClient() {
-  return supabase;
-}
+// ----------------------------------------------
+// Create client (or fake one)
+// ----------------------------------------------
+export const supabase = hasSupabase
+  ? createClient(url, key)
+  : {
+      // Fake client to prevent crashes in local mode
+      from() {
+        return {
+          select() {
+            return { data: null, error: null };
+          },
+          insert() {
+            return { data: null, error: null };
+          },
+          upsert() {
+            return { data: null, error: null };
+          },
+          update() {
+            return { data: null, error: null };
+          },
+          eq() {
+            return this;
+          },
+          single() {
+            return { data: null, error: null };
+          },
+        };
+      },
+    };
+
+console.log(
+  hasSupabase
+    ? "[supabase] Client initialised"
+    : "[supabase] No valid env keys — using local in-memory mode"
+);
