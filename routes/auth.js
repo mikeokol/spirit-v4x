@@ -1,73 +1,82 @@
-// routes/auth.js — Spirit v7.2 "Remember Me" System
-import { Router } from "express";
-import { loadUserMemory, saveUserMemory } from "../services/supabase.js";
-import { randomUUID } from "crypto";
+// routes/auth.js
+// Spirit v7 — Email Magic Link Auth Handler
 
-const router = Router();
+import express from "express";
+import { supabase, hasSupabase } from "../services/supabase.js";
 
-/**
- * Request a magic login code
- */
-router.post("/magic/start", async (req, res) => {
-  const { email } = req.body;
-  if (!email) return res.json({ ok: false, error: "Missing email." });
+const router = express.Router();
 
-  const code = Math.floor(100000 + Math.random() * 900000).toString();
+// ---------------------------------------------------------
+// CHECK ENV
+// ---------------------------------------------------------
+if (!hasSupabase) {
+  console.warn("[AUTH] Supabase keys missing — auth disabled.");
+}
 
-  await saveUserMemory(email, {
-    magicCode: code,
-    magicCodeIssuedAt: Date.now(),
-  });
+// ---------------------------------------------------------
+// SEND MAGIC LINK
+// ---------------------------------------------------------
+router.post("/login", async (req, res) => {
+  try {
+    const { email } = req.body;
 
-  return res.json({
-    ok: true,
-    message: "Magic code generated.",
-    code, // in production you'd email it
-  });
+    if (!email) {
+      return res.status(400).json({ ok: false, error: "Missing email" });
+    }
+
+    if (!hasSupabase) {
+      return res.status(500).json({ ok: false, error: "Supabase not configured" });
+    }
+
+    const { data, error } = await supabase.auth.signInWithOtp({
+      email,
+      options: {
+        emailRedirectTo: process.env.SITE_URL || "http://localhost:3000"
+      }
+    });
+
+    if (error) {
+      console.error("[AUTH error]", error);
+      return res.status(500).json({ ok: false, error: error.message });
+    }
+
+    return res.json({ ok: true, message: "Magic link sent" });
+  } catch (err) {
+    console.error("[AUTH /login error]", err);
+    return res.status(500).json({ ok: false, error: "Login failed" });
+  }
 });
 
-/**
- * Verify magic code and issue userId
- */
-router.post("/magic/verify", async (req, res) => {
-  const { email, code } = req.body;
+// ---------------------------------------------------------
+// VALIDATE SESSION (Frontend sends token to backend)
+// ---------------------------------------------------------
+router.post("/verify", async (req, res) => {
+  try {
+    const { access_token } = req.body;
 
-  const { memory } = await loadUserMemory(email);
+    if (!access_token) {
+      return res.status(400).json({ ok: false, error: "Missing access_token" });
+    }
 
-  if (!memory || memory.magicCode !== code) {
-    return res.json({ ok: false, error: "Invalid code." });
+    const { data, error } = await supabase.auth.getUser(access_token);
+
+    if (error || !data?.user) {
+      return res.status(401).json({ ok: false, error: "Invalid token" });
+    }
+
+    // This userId ties the tester to ALL Spirit memory systems
+    const userId = data.user.id;
+
+    return res.json({
+      ok: true,
+      userId,
+      email: data.user.email
+    });
+
+  } catch (err) {
+    console.error("[AUTH /verify error]", err);
+    return res.status(500).json({ ok: false, error: "Verification failed" });
   }
-
-  const existingId =
-    memory.userId || `spirit-${email}-${randomUUID().slice(0, 6)}`;
-
-  await saveUserMemory(email, {
-    userId: existingId,
-    magicCode: null,
-    magicCodeIssuedAt: null,
-    lastLogin: Date.now(),
-  });
-
-  return res.json({ ok: true, userId: existingId });
-});
-
-/**
- * Check if Spirit remembers this email
- */
-router.post("/magic/check", async (req, res) => {
-  const { email } = req.body;
-
-  const { memory } = await loadUserMemory(email);
-
-  if (!memory?.userId) {
-    return res.json({ ok: false, remembers: false });
-  }
-
-  return res.json({
-    ok: true,
-    remembers: true,
-    userId: memory.userId,
-  });
 });
 
 export default router;
