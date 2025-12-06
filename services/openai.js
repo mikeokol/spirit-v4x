@@ -1,29 +1,39 @@
-// services/supabase.js
-// Spirit v7 — Safe Supabase Wrapper (never throws when keys missing)
+// services/openai.js
+// Spirit v7 — OpenAI client wrapper (production clean)
 
-import { createClient } from "@supabase/supabase-js";
+import OpenAI from "openai";
 
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_KEY =
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
+// Important: This service is ONLY for calling OpenAI.
+// No Supabase logic belongs in this file.
 
-// ------------------------------------------------------
-// If keys missing → run SAFELY in local-memory mode
-// ------------------------------------------------------
-if (!SUPABASE_URL || !SUPABASE_KEY) {
-  console.log("[supabase] No valid keys detected — using in-memory mode.");
-  export const supabase = null;   // VERY IMPORTANT
-  export const hasSupabase = false;
-  return;
+const apiKey = process.env.OPENAI_API_KEY;
+
+if (!apiKey) {
+  console.error("[OpenAI] Missing OPENAI_API_KEY — AI responses will fail.");
 }
 
-// ------------------------------------------------------
-// If keys exist → initialize Supabase normally
-// ------------------------------------------------------
-export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
-  auth: { persistSession: false },
+export const openai = new OpenAI({
+  apiKey,
 });
 
-export const hasSupabase = true;
+// Core wrapper for Spirit executor
+export async function generateCompletion({ system, user, model = "gpt-4.1-mini" }) {
+  try {
+    const response = await openai.chat.completions.create({
+      model,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+      temperature: 0.7,
+    });
 
-console.log("[supabase] Client initialised.");
+    return {
+      ok: true,
+      text: response.choices?.[0]?.message?.content || "",
+    };
+  } catch (err) {
+    console.error("[OpenAI Error]", err);
+    return { ok: false, error: err?.message || "OpenAI failure" };
+  }
+}
