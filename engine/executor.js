@@ -10,7 +10,7 @@ import {
   saveHybridHistory,
   saveFitnessPlan,
 } from "./memory.js";
-import { classifyIntent, scoreConfidence, buildECM } from "./engine/intentEngine.js"; // ← new
+import { classifyIntent, scoreConfidence, buildECM } from "./intentEngine.js"; // ← FIXED PATH
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
