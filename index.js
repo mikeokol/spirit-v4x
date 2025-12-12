@@ -2,7 +2,7 @@
 // Clean, production-safe, Lovable-compatible
 
 import express from "express";
-import cors from "morgan";
+import cors from "cors";
 import morgan from "morgan";
 import dotenv from "dotenv";
 
@@ -15,14 +15,7 @@ import authRouter from "./routes/auth.js";
 import spiritRouter from "./routes/spirit.js";
 import liveRouter from "./routes/live.js";
 import debugRouter from "./routes/debug.js";
-
-// OPTIONAL: set-by-set coach (file may not exist yet)
-let liveNextSetHandler = null;
-try {
-  liveNextSetHandler = await import("./routes/liveNextSet.js").then((m) => m.default);
-} catch {
-  console.warn("[WARN] liveNextSet.js not found – route disabled until file is added");
-}
+import liveNextSetHandler from "./routes/liveNextSet.js"; // file exists → direct import
 
 // ---------------------------------------------
 // INIT APP
@@ -56,20 +49,19 @@ app.get("/", (req, res) => {
 });
 
 // ---------------------------------------------
-// ROUTES  (all existing + conditional new)
+// ROUTES  (all live)
 // ---------------------------------------------
 app.get("/spirit/memory", async (req, res) => {
   const userId = req.query.id;
   if (!userId) return res.status(400).json({ ok: false, error: "Missing userId" });
-  /* memory helper – assumes you have loadUserMemory() already */
-  const memory = await loadUserMemory(userId);
+  const memory = await loadUserMemory(userId); // assumes you have this helper
   res.json({ ok: true, identity: memory.identity || null });
 });
 
 app.use("/auth", authRouter);
 app.use("/spirit", spiritRouter);
 app.use("/live", liveRouter);
-if (liveNextSetHandler) app.post("/live/next-set", liveNextSetHandler); // only if file exists
+app.post("/live/next-set", liveNextSetHandler); // set-by-set coaching
 app.use("/debug", debugRouter);
 
 // ---------------------------------------------
