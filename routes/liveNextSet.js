@@ -1,11 +1,11 @@
-import { loadUserMemory, saveUserMemory } from "../engine/memory.js";
+import { loadMemory, saveMemory } from "../engine/memory.js";
 import { runSpirit } from "../engine/executor.js";
 
 export default async function liveNextSetHandler(req, res) {
   const { userId, markDone = false, chat = "" } = req.body;
   if (!userId) return res.status(400).json({ ok: false, error: "Missing userId" });
 
-  const memory = await loadUserMemory(userId);
+  const memory = await loadMemory(userId);
 
   /* first call – store the list if not present */
   if (!memory.liveWorkoutList) {
@@ -13,7 +13,7 @@ export default async function liveNextSetHandler(req, res) {
     const list = parseList(raw);
     memory.liveWorkoutList = list;
     memory.liveIndex = 0;
-    await saveUserMemory(userId, memory);
+    await saveMemory(userId, memory);
   }
 
   const list = memory.liveWorkoutList;
@@ -28,12 +28,12 @@ export default async function liveNextSetHandler(req, res) {
   /* mark done – advance */
   if (markDone) idx += 1;
   if (idx >= list.length) {
-    await saveUserMemory(userId, { ...memory, liveWorkoutList: null, liveIndex: 0 });
+    await saveMemory(userId, { ...memory, liveWorkoutList: null, liveIndex: 0 });
     return res.json({ ok: true, finished: true, reply: "Great session! Hydrate and rest. See you next time." });
   }
 
   memory.liveIndex = idx;
-  await saveUserMemory(userId, memory);
+  await saveMemory(userId, memory);
   const next = list[idx];
   const cue = await coachCue(next);
   return res.json({ ok: true, exercise: next, reply: cue });
