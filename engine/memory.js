@@ -1,74 +1,147 @@
-import { loadMemory, saveMemory } from "../engine/memory.js";
-import { runSpirit } from "../engine/executor.js";
+// engine/memory.js
+// Spirit v7 — FULL MEMORY LAYER (ALL SYSTEMS SUPPORTED)
 
-export default async function liveNextSetHandler(req, res) {
-  const { userId, markDone = false, chat = "" } = req.body;
-  if (!userId) return res.status(400).json({ ok: false, error: "Missing userId" });
+import { supabase, hasSupabase } from "../services/supabase.js";
 
-  const memory = await loadMemory(userId);
+const memoryStore = {
+  users: {},
+  liveSessions: {} // keyed by userId
+};
 
-  /* first call – store the list if not present */
-  if (!memory.liveWorkoutList) {
-    const raw = memory.lastWorkoutRaw || "";
-    const list = parseList(raw);
-    memory.liveWorkoutList = list;
-    memory.liveIndex = 0;
-    await saveMemory(userId, memory);
+// --------------------------------------------------------
+// USER MEMORY — Load
+// --------------------------------------------------------
+export async function loadMemory(userId) {
+  if (!hasSupabase) {
+    return memoryStore.users[userId] || {};
   }
 
-  const list = memory.liveWorkoutList;
-  let idx = memory.liveIndex || 0;
+  const { data, error } = await supabase
+    .from("spirit_memory")
+    .select("data")
+    .eq("userId", userId)
+    .single();
 
-  /* user chatted – answer but keep index */
-  if (chat) {
-    const answer = await coachChat(chat, list[idx]);
-    return res.json({ ok: true, reply: answer, continueIndex: idx });
+  if (error || !data) return {};
+  return data.data || {};
+}
+
+// --------------------------------------------------------
+// USER MEMORY — Save
+// --------------------------------------------------------
+export async function saveMemory(userId, newData) {
+  if (!hasSupabase) {
+    memoryStore.users[userId] = {
+      ...(memoryStore.users[userId] || {}),
+      ...newData,
+    };
+    return;
   }
 
-  /* mark done – advance */
-  if (markDone) idx += 1;
-  if (idx >= list.length) {
-    await saveMemory(userId, { ...memory, liveWorkoutList: null, liveIndex: 0 });
-    return res.json({ ok: true, finished: true, reply: "Great session! Hydrate and rest. See you next time." });
+  await supabase.from("spirit_memory").upsert({
+    userId,
+    data: newData,
+  });
+}
+
+// --------------------------------------------------------
+// CREATOR HISTORY
+// --------------------------------------------------------
+export async function saveCreatorHistory(userId, entry) {
+  const current = await loadMemory(userId);
+  const history = current.creatorHistory || [];
+
+  history.push({ ts: Date.now(), ...entry });
+
+  await saveMemory(userId, { ...current, creatorHistory: history });
+}
+
+// --------------------------------------------------------
+// HYBRID HISTORY
+// --------------------------------------------------------
+export async function saveHybridHistory(userId, entry) {
+  const current = await loadMemory(userId);
+  const history = current.hybridHistory || [];
+
+  history.push({ ts: Date.now(), ...entry });
+
+  await saveMemory(userId, { ...current, hybridHistory: history });
+}
+
+// --------------------------------------------------------
+// REFLECTION HISTORY
+// --------------------------------------------------------
+export async function saveReflectionHistory(userId, reflection) {
+  const current = await loadMemory(userId);
+  const history = current.reflections || [];
+
+  history.push({ ts: Date.now(), reflection });
+
+  await saveMemory(userId, { ...current, reflections: history });
+}
+
+// --------------------------------------------------------
+// FITNESS PLAN SAVE
+// --------------------------------------------------------
+export async function saveFitnessPlan(userId, plan) {
+  const current = await loadMemory(userId);
+  await saveMemory(userId, { ...current, lastFitnessPlan: plan });
+}
+
+// --------------------------------------------------------
+// LIVE SESSIONS — SAVE EVENT (Local + Supabase)
+// --------------------------------------------------------
+export async function recordLiveEvent(userId, sessionId, eventData) {
+  const entry = {
+    ts: new Date().toISOString(),
+    userId,
+    sessionId,
+    ...eventData,
+  };
+
+  // local
+  if (!memoryStore.liveSessions[userId]) {
+    memoryStore.liveSessions[userId] = [];
   }
+  memoryStore.liveSessions[userId].push(entry);
 
-  memory.liveIndex = idx;
-  await saveMemory(userId, memory);
-  const next = list[idx];
-  const cue = await coachCue(next);
-  return res.json({ ok: true, exercise: next, reply: cue });
-
-  /* ---------- helpers ---------- */
-  function parseList(text) {
-    return text
-      .split("\n")
-      .filter((l) => /^[-•]/.test(l.trim()))
-      .map((l) => {
-        const name = l.replace(/^[-•]\s*/, "").split(/ \(/)[0].trim();
-        const sets = Number(l.match(/(\d+)\s*sets?/i)?.[1] || 3);
-        const reps = Number(l.match(/(\d+)\s*reps?/i)?.[1] || 10);
-        return { name, sets, reps };
-      });
-  }
-
-  async function coachCue(ex) {
-    const res = await runSpirit({
-      userId,
-      message: `Concise cue for ${ex.sets}×${ex.reps} ${ex.name}. Keep it short, motivational, present tense.`,
-      mode: "fitness",
-      taskType: "live_coaching",
+  // supabase
+  if (hasSupabase) {
+    const { error } = await supabase.from("live_sessions").insert({
+      userid: userId,
+      sessionid: sessionId,
+      event: entry,
+      ts: entry.ts,
     });
-    return res.reply || `Next: ${ex.sets}×${ex.reps} ${ex.name}`;
+
+    if (error) console.error("[SUPABASE LIVE INSERT ERROR]", error);
+  }
+}
+
+// --------------------------------------------------------
+// LIVE SESSIONS — FETCH HISTORY
+// --------------------------------------------------------
+export async function getUserLiveHistory(userId) {
+  if (hasSupabase) {
+    const { data, error } = await supabase
+      .from("live_sessions")
+      .select("*")
+      .eq("userid", userId)
+      .order("ts", { ascending: true });
+
+    if (!error && data) return data;
   }
 
-  async function coachChat(text, currentEx) {
-    const res = await runSpirit({
-      userId,
-      message: text,
-      mode: "fitness",
-      taskType: "live_coaching",
-      meta: { currentExercise: currentEx },
-    });
-    return res.reply || "Got it. Ready to continue?";
+  return memoryStore.liveSessions[userId] || [];
+}
+
+// --------------------------------------------------------
+// LIVE SESSIONS — CLEAR HISTORY
+// --------------------------------------------------------
+export async function clearLiveHistory(userId) {
+  delete memoryStore.liveSessions[userId];
+
+  if (hasSupabase) {
+    await supabase.from("live_sessions").delete().eq("userid", userId);
   }
 }
