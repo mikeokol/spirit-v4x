@@ -1,6 +1,5 @@
 // engine/fitnessParser.js
-// Spirit v7 — Fitness Response Parser
-// Extracts structured macros, meals, supplements from AI response
+// Spirit v7 — Fitness Response Parser (loose, natural-language safe)
 
 export function parseFitnessResponse(text = "") {
   if (!text) return null;
@@ -16,58 +15,37 @@ export function parseFitnessResponse(text = "") {
     supplements: []
   };
 
-  // Extract macros - multiple formats
-  const calorieMatch = text.match(/(\d+)\s*(calories?|kcal)/i);
-  const proteinMatch = text.match(/(\d+)\s*g?\s*protein/i);
-  const carbsMatch = text.match(/(\d+)\s*g?\s*carbs/i);
-  const fatsMatch = text.match(/(\d+)\s*g?\s*fats/i);
-  const waterMatch = text.match(/(\d+(?:\.\d+)?)\s*L?\s*(water|litres?|liters?)/i);
+  /* -------- macros (case-insensitive, colon optional) -------- */
+  const cal  = text.match(/(\d+)\s*(calories?|kcal)/i);
+  const prot = text.match(/(\d+)\s*g?\s*protein/i);
+  const carb = text.match(/(\d+)\s*g?\s*carbs?/i);
+  const fat  = text.match(/(\d+)\s*g?\s*fats?/i);
+  const h2o  = text.match(/(\d+(?:\.\d+)?)\s*L?\s*(water|litres?|liters?)/i);
+  if (cal)  data.calories   = parseInt(cal[1],  10);
+  if (prot) data.protein    = parseInt(prot[1], 10);
+  if (carb) data.carbs      = parseInt(carb[1], 10);
+  if (fat)  data.fats       = parseInt(fat[1],  10);
+  if (h2o)  data.waterLitres= parseFloat(h2o[1]);
 
-  if (calorieMatch) data.calories = parseInt(calorieMatch[1]);
-  if (proteinMatch) data.protein = parseInt(proteinMatch[1]);
-  if (carbsMatch) data.carbs = parseInt(carbsMatch[1]);
-  if (fatsMatch) data.fats = parseInt(fatsMatch[1]);
-  if (waterMatch) data.waterLitres = parseFloat(waterMatch[1]);
+  /* -------- weekly split (grab every day block until empty line) -------- */
+  const dayBlock = text.match(/(monday|tuesday|wednesday|thursday|friday|saturday|sunday)[:\s\-]+([^\n]+)/gi);
+  if (dayBlock) data.weeklySplit = dayBlock.map(l => l.trim());
 
-  // Extract weekly split
-  const days = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
-  days.forEach(day => {
-    const dayRegex = new RegExp(`${day}[:\\s-]+([^\n]+)`, 'gi');
-    const match = text.match(dayRegex);
-    if (match) {
-      data.weeklySplit.push(match[0].trim());
-    }
-  });
-
-  // Extract meals (basic pattern)
-  const mealMatches = text.match(/(\d+(?:\.\d+)?)\s*kc?al/gi);
-  if (mealMatches) {
-    // Simple meal extraction - you can enhance this
-    const lines = text.split('\n');
-    lines.forEach(line => {
-      if (line.toLowerCase().includes('meal') && line.match(/\d+\s*kc?al/i)) {
-        const calories = line.match(/(\d+)\s*kc?al/i);
-        if (calories) {
-          data.meals.push({
-            time: "Flexible",
-            food: line.replace(/[-•]\s*/, "").trim(),
-            cals: parseInt(calories[1])
-          });
-        }
-      }
+  /* -------- meals (any line with kcal / calories) -------- */
+  const mealLines = text.match(/^.*\d+\s*(kcal|calories?).*$/gim);
+  if (mealLines) {
+    mealLines.forEach(l => {
+      const cals = l.match(/(\d+)\s*(kcal|calories?)/i);
+      if (cals) data.meals.push({ time: "Flexible", food: l.replace(/^[-•]\s*/,"").trim(), cals: parseInt(cals[1],10) });
     });
   }
 
-  // Extract supplements
-  const supplementLines = text.split('\n').filter(line => 
-    line.toLowerCase().includes('supplement') || 
-    line.match(/^[-•]\s*(creatine|protein|multivitamin|omega|vitamin)/i)
+  /*  -------- supplements (bullet or keyword) -------- */
+  const suppLines = text.split('\n').filter(l =>
+    l.match(/^[-•]\s*(creatine|protein|multivitamin|omega|vitamin|bcaa|zinc|magnesium)/i) ||
+    l.toLowerCase().includes('supplement')
   );
-  
-  supplementLines.forEach(line => {
-    const cleanLine = line.replace(/^[-•]\s*/, "").trim();
-    if (cleanLine) data.supplements.push(cleanLine);
-  });
+  suppLines.forEach(l => data.supplements.push(l.replace(/^[-•]\s*/,"").trim()));
 
   return data;
 }
