@@ -11,6 +11,7 @@ import {
   saveFitnessPlan,
 } from "./memory.js";
 import { classifyIntent, scoreConfidence, buildECM } from "./intentEngine.js"; // ← FIXED PATH
+import { parseFitnessResponse } from "./fitnessParser.js";                   // ← NEW IMPORT
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -51,7 +52,20 @@ export async function runSpirit({ userId, message, mode, taskType, meta = {} }) 
       ecm, // ← resume anchor
     });
 
-    return { ok: true, reply, meta: { intent, confidence, ecm } }; // ← invisible polish
+    // -----------------------------------------------------------------
+    // BUILD RESPONSE OBJECT
+    // -----------------------------------------------------------------
+    let responseData = { ok: true, reply, meta: { intent, confidence, ecm } };
+
+    // Parse fitness data if it's a workout plan
+    if (mode === "fitness" && taskType === "workout_plan") {
+      const parsedFitness = parseFitnessResponse(reply);
+      if (parsedFitness) {
+        responseData.plan = parsedFitness;
+      }
+    }
+
+    return responseData;
   } catch (err) {
     console.error("❌ Spirit Executor Error:", err);
     return { ok: false, error: "Executor failure." };
