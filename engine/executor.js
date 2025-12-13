@@ -121,7 +121,7 @@ Stay precise, grounded, safe, and user-aware at all times.
     sanctuary_chat: "Reply with 1–2 paragraphs max. No lists unless needed.",
     reflection_chat: "Ask thoughtful questions. Invite introspection and emotional clarity.",
     creator_script: "Provide hooks, scripts, thumbnails, angles, delivery notes.",
-    workout_plan: "Return a complete workout with sets, reps, rest, warmup, cooldown.",
+    workout_plan: "Generate a detailed weekly workout plan including exercises, sets, reps, rest periods, warmup, and cooldown for each day of the week.",
     hybrid_plan: "Blend personal, creator, fitness, and mindset actions into a unified day plan.",
   };
 
@@ -131,7 +131,7 @@ ${base}
 Mode: ${mode}
 Task: ${taskType}
 
-${{sanctuary:"Soft, calm, grounding. You mirror emotion gently and create safety.",reflection:"Ask probing questions, explore patterns, help user gain clarity.",hybrid:"Blend fitness, mindset, planning, and creative structure into one plan.",fitness:"Design safe, structured workouts. Include warmup, sets, reps, rest, cooldown.",creator:"Write hooks, scripts, content strategy, thumbnails, and retention advice.",live:"NOT USED — voice/live handled in live.js."}[mode] || ""}
+${{sanctuary:"Soft, calm, grounding. You mirror emotion gently and create safety.",reflection:"Ask probing questions, explore patterns, help user gain clarity.",hybrid:"Blend fitness, mindset, planning, and creative structure into one plan.",fitness:"Design safe, structured workouts. Include warmup, sets, reps, rest, cooldown.",creator:"Write hooks, scripts, content strategy, thumbnails, and retention advice.",live:"NOT USED — voice/live handled in live.js."}[mode] || ""
 ${taskPrompts[taskType] || ""}
 `;
 }
