@@ -11,7 +11,7 @@ import {
   saveFitnessPlan,
 } from "./memory.js";
 import { classifyIntent, scoreConfidence, buildECM } from "./intentEngine.js";
-import { parseFitnessResponse } from "./fitnessParser.js";   // ← NEW
+import { parseFitnessResponse } from "./fitnessParser.js"; // ← NEW
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -87,7 +87,7 @@ async function handleMemoryUpdates({
 }
 
 // -----------------------------------------------------
-// SYSTEM PROMPTS  (Prime-Directive lock for live_set)
+// SYSTEM PROMPTS  (Prime-Directive compliant)
 // -----------------------------------------------------
 function buildSystemPrompt({ mode, taskType, userMemory, intent, confidence, ecm }) {
   const taskPrompts = {
@@ -96,7 +96,10 @@ function buildSystemPrompt({ mode, taskType, userMemory, intent, confidence, ecm
     creator_script: "Provide hooks, scripts, thumbnails, angles, delivery notes.",
     workout_plan: "Return a complete workout with sets, reps, rest, warmup, cooldown.",
     hybrid_plan: "Blend personal, creator, fitness, and mindset actions into a unified day plan.",
-    live_set: "Reply with ONE line: exercise + sets + reps. Second line (optional): short cue. No questions, no future sets, no greetings.", // ← LIVE LOCK
+    sanctuary_clarify:
+      "Compress, name, and bound the user's input. Output 1-3 neutral bullet lines. No questions, no advice, no emotion labels.", // ← SANCTUARY LOCK
+    live_set:
+      "Reply with ONE line: exercise + sets + reps. Second line (optional): short cue. No questions, no future sets, no greetings.", // ← LIVE LOCK
   };
 
   const toneMap = {
