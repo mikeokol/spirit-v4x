@@ -87,7 +87,7 @@ async function handleMemoryUpdates({
 }
 
 // -----------------------------------------------------
-// SYSTEM PROMPTS
+// SYSTEM PROMPTS  (Prime-Directive lock for live_set)
 // -----------------------------------------------------
 function buildSystemPrompt({ mode, taskType, userMemory, intent, confidence, ecm }) {
   const taskPrompts = {
@@ -96,6 +96,7 @@ function buildSystemPrompt({ mode, taskType, userMemory, intent, confidence, ecm
     creator_script: "Provide hooks, scripts, thumbnails, angles, delivery notes.",
     workout_plan: "Return a complete workout with sets, reps, rest, warmup, cooldown.",
     hybrid_plan: "Blend personal, creator, fitness, and mindset actions into a unified day plan.",
+    live_set: "Reply with ONE line: exercise + sets + reps. Second line (optional): short cue. No questions, no future sets, no greetings.", // ← LIVE LOCK
   };
 
   const toneMap = {
