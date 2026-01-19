@@ -5,7 +5,7 @@ from sqlmodel import select
 from spirit.db import async_session
 from spirit.models import Execution, Goal, GoalState
 from spirit.services.execution_service import log_execution
-from spirit.api.goals import current_user
+from spirit.api.auth import get_current_user as current_user
 
 router = APIRouter(prefix="/trajectory", tags=["trajectory"])
 
