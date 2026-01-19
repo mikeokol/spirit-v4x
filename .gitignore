@@ -1,45 +1,34 @@
-# ============================
-# Node / NPM / Dependencies
-# ============================
-node_modules/
-npm-debug.log
-yarn-debug.log
-yarn-error.log
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
 
-# ============================
-# Environment Variables
-# ============================
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Env & secrets
 .env
-.env.*  
-*.local
+*.db
+*.db-journal
+*.key
 
-# ============================
-# Replit / Editor Files
-# ============================
-.upm/
-.replit
+# Docker
+.dockerignore
 
-# ============================
-# Logs
-# ============================
-logs
-*.log
-*.lock
-npm-debug.log*
-pids
-*.pid
-*.seed
-*.pid.lock
-
-# ============================
-# Cache / Build Artifacts
-# ============================
-.cache/
-dist/
-build/
-
-# ============================
-# OS Files
-# ============================
+# OS
 .DS_Store
-Thumbs.db.env
+Thumbs.db
+
+# Alembic
+alembic.ini.local
