@@ -1,0 +1,23 @@
+version: "3.9"
+
+services:
+  spirit:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - spirit_data:/app
+    environment:
+      - DB_URL=sqlite+aiosqlite:///./spirit.db
+      - JWT_SECRET=${JWT_SECRET:?err}
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:3000}
+    command: >
+      sh -c "
+        alembic upgrade head &&
+        uvicorn spirit.main:app --host 0.0.0.0 --port 8000
+      "
+
+volumes:
+  spirit_data:
