@@ -6,7 +6,9 @@ from spirit.api import auth, goals, trajectory, strategic
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    await create_db_and_tables()
+    # never auto-create tables in prod
+    if settings.env != "prod":
+        await create_db_and_tables()
     yield
 
 app = FastAPI(
@@ -16,7 +18,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# health
+# root probe
 @app.get("/")
 def read_root():
     return {"message": "Spirit continuity ledger is running", "docs": "/docs"}
