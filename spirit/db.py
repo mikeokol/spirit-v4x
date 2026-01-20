@@ -7,6 +7,7 @@ from spirit.config import settings
 engine = create_async_engine(
     settings.db_url,
     echo=False,
+    # no SQLite-only args for Postgres
     connect_args={"check_same_thread": False} if "sqlite" in settings.db_url else {},
 )
 
