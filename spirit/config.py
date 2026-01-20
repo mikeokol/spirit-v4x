@@ -1,9 +1,10 @@
 from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
+    env: str = "dev"  # dev | prod
+    db_url: str = "sqlite+aiosqlite:///./spirit.db"
     jwt_secret: str
     jwt_expire_minutes: int = 30 * 24 * 60  # 30 days
-    db_url: str = "sqlite+aiosqlite:///./spirit.db"
     cors_origins: list[str] = ["http://localhost:3000"]
     log_level: str = "INFO"
 
