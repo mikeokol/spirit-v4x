@@ -17,9 +17,9 @@ app = FastAPI(
 )
 
 # health
-@app.get("/health")
-async def health():
-    return {"status": "ok"}
+@app.get("/")
+def read_root():
+    return {"message": "Spirit continuity ledger is running", "docs": "/docs"}
 
 # routers
 app.include_router(auth.router, prefix="/api", tags=["auth"])
