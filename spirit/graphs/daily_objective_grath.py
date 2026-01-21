@@ -7,6 +7,7 @@ from typing import Any, Dict, Optional
 from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
 from typing_extensions import TypedDict
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from spirit.db import async_session
 from spirit.models import Goal, GoalState, Execution
@@ -18,47 +19,64 @@ from spirit.services.openai_client import plan_daily_objective
 class GraphState(TypedDict):
     user_id: int
     messages: list[str]  # LangGraph convention for streaming/debug
-    active_goal: Optional[Goal]
-    recent_executions: list[Execution]
-    mode: str  # "trajectory" | "strategic"
+    goal: Optional[Dict[str, Any]]
+    mode: Optional[Dict[str, str]]
+    last7: list[Dict[str, Any]]
     raw_plan: Optional[Dict[str, Any]]
     validated_plan: Optional[DailyObjectiveSchema]
 
 
-# ---------- 1. load state ----------
+# ---------- 1. load_state ----------
 async def load_state(state: GraphState) -> GraphState:
-    async with async_session() as db:
-        # active goal
-        goal = await db.get(Goal, state["user_id"])  # simplified lookup
-        if not goal or goal.state != GoalState.active:
+    user_id = state["user_id"]
+    today = date.today()
+    start = today - timedelta(days=7)
+
+    async with async_session() as session:
+        # ----- active goal -----
+        goal_row = await session.scalar(
+            select(Goal).where(Goal.user_id == user_id, Goal.state == GoalState.active)
+        )
+        if not goal_row:
             raise ValueError("No active goal")
 
-        # last 7 executions
-        since = date.today() - timedelta(days=7)
-        rows = await db.execute(
+        # ----- mode state (placeholder until you have a Mode table) -----
+        mode = {
+            "constraint_level": "observer",  # or query real table later
+            "strategic_state": "locked",
+        }
+
+        # ----- last 7 executions -----
+        rows = await session.scalars(
             select(Execution)
-            .where(Execution.goal_id == goal.id)
-            .where(Execution.day >= since)
+            .where(Execution.goal_id == goal_row.id)
+            .where(Execution.day >= start.isoformat())
             .order_by(Execution.day.desc())
         )
-        executions = rows.scalars().all()
-
-        # mode gate (placeholder)
-        mode = "strategic" if goal.execution_rate > 0.7 else "trajectory"
+        last7 = [
+            {"date": r.day, "status": "done" if r.executed else "miss"}
+            for r in rows.all()
+        ]
 
     return {
         **state,
-        "active_goal": goal,
-        "recent_executions": executions,
+        "goal": {
+            "id": goal_row.id,
+            "title": goal_row.text,
+            "success_metric": "execution_rate",  # placeholder
+            "target_value": 0.7,
+            "deadline": None,
+        },
         "mode": mode,
+        "last7": last7,
     }
 
 
 # ---------- 2. apply rules ----------
 async def apply_rules(state: GraphState) -> GraphState:
     plan_prompt = adjust_for_misses(
-        goal=state["active_goal"],
-        executions=state["recent_executions"],
+        goal=state["goal"],
+        last7=state["last7"],
         mode=state["mode"],
     )
     return {**state, "messages": [plan_prompt]}
@@ -73,11 +91,10 @@ async def plan_with_llm(state: GraphState) -> GraphState:
 # ---------- 4. validate & store ----------
 async def validate_and_store(state: GraphState) -> GraphState:
     schema = DailyObjectiveSchema.model_validate(state["raw_plan"])
-    async with async_session() as db:
-        # insert into daily_objectives table (create model if needed)
+    async with async_session() as session:
         from spirit.models import DailyObjective
         row = DailyObjective(
-            goal_id=state["active_goal"].id,
+            goal_id=state["goal"]["id"],
             day=date.today(),
             primary_objective=schema.primary_objective,
             micro_steps=schema.micro_steps,
@@ -86,14 +103,13 @@ async def validate_and_store(state: GraphState) -> GraphState:
             difficulty=schema.difficulty,
             adjustment_reason=schema.adjustment_reason,
         )
-        db.add(row)
-        await db.commit()
+        session.add(row)
+        await session.commit()
     return {**state, "validated_plan": schema}
 
 
 # ---------- 5. return payload ----------
 async def return_payload(state: GraphState) -> GraphState:
-    # Graph must return serialisable dict
     return {"objective": state["validated_plan"].model_dump()}
 
 
