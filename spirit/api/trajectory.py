@@ -1,10 +1,11 @@
 from datetime import date
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from spirit.db import async_session
-from spirit.models import Goal, GoalState
+from spirit.models import Goal, GoalState, Execution
 from spirit.api.auth import get_current_user
-from spirit.graphs.daily_objective_graph import daily_objective_graph
+from spirit.graphs.daily_objective_graph import run_daily_objective
 from spirit.models import User
 
 router = APIRouter(prefix="/trajectory", tags=["trajectory"])
@@ -46,6 +47,5 @@ async def history(limit: int = 30, user: User = Depends(get_current_user), db: A
 async def generate_daily_objective(
     user: User = Depends(get_current_user),
 ):
-    state = {"user_id": user.id}
-    result = await daily_objective_graph.ainvoke(state)
-    return result["objective"]
+    objective = await run_daily_objective(user.id, date.today().isoformat())
+    return objective
