@@ -150,5 +150,3 @@ daily_objective_app = build_daily_objective_graph()
 async def run_daily_objective(user_id: int, today_iso: str) -> Dict[str, Any]:
     final = await daily_objective_app.ainvoke({"user_id": user_id, "today": today_iso})
     return final["stored_objective"]
-
-"""
