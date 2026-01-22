@@ -72,14 +72,28 @@ async def load_state(state: GraphState) -> GraphState:
     }
 
 
-# ---------- 2. apply rules ----------
+# ---------- 2. apply_rules (deterministic) ----------
 async def apply_rules(state: GraphState) -> GraphState:
-    plan_prompt = adjust_for_misses(
-        goal=state["goal"],
-        last7=state["last7"],
-        mode=state["mode"],
-    )
-    return {**state, "messages": [plan_prompt]}
+    last7 = state.get("last7", [])
+    mode = state.get("mode", {})
+
+    misses = sum(1 for e in last7 if e.get("status") in ("missed", "partial"))
+    did_yesterday = any(e.get("status") == "done" for e in last7[-1:])
+
+    constraint_level = mode.get("constraint_level", "observer")
+
+    stabilization = misses >= 3
+
+    constraints = {
+        "constraint_level": constraint_level,
+        "stabilization": stabilization,
+        "difficulty_cap": 4 if stabilization else (6 if not did_yesterday else 8),
+        "max_micro_steps": 3,
+        "time_budget_cap": 60 if stabilization else 120,
+    }
+
+    state["constraints"] = constraints
+    return state
 
 
 # ---------- 3. plan with LLM ----------
