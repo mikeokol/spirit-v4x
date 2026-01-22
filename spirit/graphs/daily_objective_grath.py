@@ -1,4 +1,5 @@
-"""
+from spirit.graphs.daily_objective_graph import daily_objective_graph
+""
 Daily-objective generation state-machine.
 Nodes are pure async functions; edges are defined in compile_graph().
 """
