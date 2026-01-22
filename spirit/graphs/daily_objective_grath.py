@@ -96,10 +96,32 @@ async def apply_rules(state: GraphState) -> GraphState:
     return state
 
 
-# ---------- 3. plan with LLM ----------
+# ---------- 3. plan_with_llm (Structured Output) ----------
 async def plan_with_llm(state: GraphState) -> GraphState:
-    raw = await plan_daily_objective(prompt=state["messages"][0])
-    return {**state, "raw_plan": raw}
+    goal = state["goal"]
+    constraints = state["constraints"]
+    last7 = state.get("last7", [])
+
+    # Build prompt
+    recent = "\n".join(
+        f"- {e['date']}: {e['status']}" for e in last7[:3]
+    )
+    prompt = (
+        f"Goal: {goal['title']}\n"
+        f"Recent 3 days:\n{recent}\n"
+        f"Constraints: difficulty ≤ {constraints['difficulty_cap']}, "
+        f"time ≤ {constraints['time_budget_cap']} min, "
+        f"stabilization={constraints['stabilization']}, "
+        f"max_micro_steps={constraints['max_micro_steps']}.\n"
+        "Produce exactly one concrete daily objective that obeys these limits."
+    )
+
+    # Call OpenAI Responses API with forced schema
+    from spirit.services.openai_client import plan_daily_objective
+    ai_output = await plan_daily_objective(prompt)
+
+    state["ai_objective"] = ai_output
+    return state
 
 
 # ---------- 4. validate & store ----------
