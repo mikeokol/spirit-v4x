@@ -16,5 +16,4 @@ async def plan_daily_objective(prompt: str) -> dict:
         response_format=DailyObjectiveSchema,
     )
     parsed = completion.choices[0].message.parsed
-    logger.info(f"structured_output_parsed={isinstance(parsed, DailyObjectiveSchema)}")
-    return parsed.model_dump()
+    logger.info("structured_output_parsed", extra={"is_schema": isinstance(parsed, DailyObjectiveSchema)})
