@@ -8,17 +8,19 @@ from typing_extensions import TypedDict
 from sqlalchemy import select
 from langsmith import traceable
 from spirit.db import async_session
-from spirit.models import Goal, GoalState, Execution, DailyObjective, RealityAnchor
+from spirit.models import Goal, GoalState, Execution, DailyObjective, RealityAnchor, GoalProfile
 from spirit.schemas.daily_objective import DailyObjectiveSchema
 from spirit.schemas.reality_anchor import RealityAnchorSchema
 from spirit.services.openai_client import plan_daily_objective
 from spirit.services.decomposer import driver_math, bottleneck_pick
+from spirit.services.calibrator import build_prompt
 
 
 class GraphState(TypedDict):
     user_id: int
     today: date
     goal: Optional[Dict[str, Any]]
+    profile: Optional[Dict[str, Any]]  # goal_profile
     anchor: Optional[RealityAnchorSchema]
     drivers: Optional[Dict[str, float]]
     bottleneck: Optional[str]
@@ -62,15 +64,14 @@ async def load_state(state: GraphState) -> GraphState:
     start = today - timedelta(days=7)
 
     async with async_session() as session:
-        goal_row = await session.scalar(
-            select(Goal).where(Goal.user_id == user_id, Goal.state == GoalState.active)
-        )
+        goal_row = await session.scalar(select(Goal).where(Goal.user_id == user_id, Goal.state == GoalState.active))
         if not goal_row:
             raise ValueError("No active goal")
 
-        anchor_row = await session.scalar(
-            select(RealityAnchor).where(RealityAnchor.goal_id == goal_row.id)
-        )
+        profile_row = await session.scalar(select(GoalProfile).where(GoalProfile.goal_id == goal_row.id))
+        profile = RealityAnchorSchema.from_orm(profile_row).dict() if profile_row else None
+
+        anchor_row = await session.scalar(select(RealityAnchor).where(RealityAnchor.goal_id == goal_row.id))
         if anchor_row:
             anchor = RealityAnchorSchema(
                 offer=anchor_row.offer,
@@ -98,7 +99,8 @@ async def load_state(state: GraphState) -> GraphState:
 
     return {
         **state,
-        "goal": {"id": goal_row.id, "title": goal_row.text},
+        "goal": {"id": goal_row.id, "title": goal_row.text, "complexity": goal_row.complexity},
+        "profile": profile,
         "anchor": anchor,
         "drivers": drivers,
         "bottleneck": bottleneck,
@@ -110,23 +112,16 @@ async def load_state(state: GraphState) -> GraphState:
 async def plan_with_llm(state: GraphState) -> GraphState:
     goal = state["goal"]
     constraints = state["constraints"]
-    anchor = state["anchor"]
+    profile = state["profile"]
     bottleneck = constraints["bottleneck"]
 
-    if anchor is None:
+    if profile is None:
         prompt = (
-            "The user has not yet defined business anchors (offer, customer, channel, price, weekly targets). "
-            "Create ONE concrete objective that helps the user write these anchors."
+            "The user has not yet completed calibration (3–5 questions). "
+            "Create ONE objective that helps the user finish calibration (≤2 min)."
         )
     else:
-        drivers = state["drivers"]
-        prompt = (
-            f"Business anchors: {anchor.offer} to {anchor.target_customer} via {anchor.channel} at ${anchor.price/100}.\n"
-            f"Driver targets: {drivers['daily_leads']:.1f} leads, {drivers['daily_conversations']:.1f} convos, {drivers['daily_closes']:.1f} closes per day.\n"
-            f"Current bottleneck: {bottleneck}. "
-            f"Constraints: difficulty ≤ {constraints['difficulty_cap']}, time ≤ {constraints['time_budget_cap']} min, ≤3 micro-steps.\n"
-            "Produce exactly one concrete daily objective that reduces this bottleneck."
-        )
+        prompt = build_prompt(profile, goal["title"], bottleneck)
 
     ai_output = await plan_daily_objective(prompt)
     state["ai_objective"] = ai_output
@@ -143,12 +138,12 @@ async def validate_and_store(state: GraphState) -> GraphState:
         obj = DailyObjectiveSchema.model_validate(raw)
     except Exception:
         obj = DailyObjectiveSchema(
-            primary_objective="Write or refine your business anchors (offer, customer, channel, price, weekly targets).",
-            micro_steps=["Draft offer sentence", "Define target customer", "Set weekly lead target"],
-            time_budget_minutes=30,
-            success_criteria="You have written all 7 anchor fields.",
+            primary_objective="Complete or refine your calibration (3–5 questions, 2 min).",
+            micro_steps=["Open calibration", "Answer 3 questions", "Save"],
+            time_budget_minutes=5,
+            success_criteria="You have saved your calibration.",
             difficulty=1,
-            adjustment_reason="Fallback for anchor-creation phase",
+            adjustment_reason="Fallback for missing calibration",
         )
 
     async with async_session() as session:
