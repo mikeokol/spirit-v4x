@@ -1,5 +1,6 @@
 from datetime import date
 from typing import Dict, Optional
+from uuid import UUID
 from spirit.models import GoalProfile
 from spirit.schemas.goal_profile import GoalProfileCreate
 
@@ -15,8 +16,8 @@ def complexity_score(goal_text: str) -> str:
 def build_prompt(profile: Optional[GoalProfileCreate], goal_text: str, bottleneck: str) -> str:
     if profile is None:
         return (
-            "The user has not yet completed calibration. "
-            "Create ONE objective that helps the user finish the 3-question calibration."
+            "The user has not yet completed calibration (3–5 questions). "
+            "Create ONE objective that helps the user finish calibration (≤2 min)."
         )
 
     drivers = {
