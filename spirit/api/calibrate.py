@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from uuid import UUID
 from spirit.db import async_session
 from spirit.models import GoalProfile, Goal, GoalState, User
 from spirit.api.auth import get_current_user
