@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field, conlist
 from typing import List, Optional, Literal
+from uuid import UUID
 
 Constraint = Literal["time", "energy-health", "skill-gap", "money", "environment", "confidence", "consistency"]
 
@@ -12,6 +13,6 @@ class GoalProfileCreate(BaseModel):
     confidence: Optional[int] = Field(None, ge=1, le=10, description="Self-rated confidence 1–10")
 
 class GoalProfileRead(GoalProfileCreate):
-    id: int
-    goal_id: int
+    id: UUID
+    goal_id: UUID
     created_at: str
