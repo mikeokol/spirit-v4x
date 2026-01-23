@@ -1,14 +1,11 @@
 """
 Daily-objective generation state-machine.
-Nodes are pure async functions; edges are defined in compile_graph().
 """
 from datetime import date, timedelta
 from typing import Any, Dict, Optional
 from langgraph.graph import StateGraph, END
-from langgraph.graph.message import add_messages
 from typing_extensions import TypedDict
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 from spirit.db import async_session
 from spirit.models import Goal, GoalState, Execution, DailyObjective
 from spirit.schemas.daily_objective import DailyObjectiveSchema
@@ -17,19 +14,31 @@ from spirit.services.openai_client import plan_daily_objective
 
 class GraphState(TypedDict):
     user_id: int
-    today: str  # ISO date
+    today: date
     goal: Optional[Dict[str, Any]]
     mode: Optional[Dict[str, str]]
     last7: list[Dict[str, Any]]
-    constraints: Optional[Dict[str, Any]]  # <- added
+    constraints: Optional[Dict[str, Any]]
     ai_objective: Optional[Dict[str, Any]]
     stored_objective: Optional[Dict[str, Any]]
 
 
-# ---------- 1. load_state ----------
+def apply_rules(state: GraphState) -> GraphState:
+    last7 = state.get("last7", [])
+    misses = sum(1 for e in last7 if e.get("status") == "miss")
+    stabilization = misses >= 3
+    state["constraints"] = {
+        "stabilization": stabilization,
+        "difficulty_cap": 4 if stabilization else 8,
+        "max_micro_steps": 3,
+        "time_budget_cap": 60 if stabilization else 120,
+    }
+    return state
+
+
 async def load_state(state: GraphState) -> GraphState:
     user_id = state["user_id"]
-    today = date.fromisoformat(state["today"])
+    today = state["today"]
     start = today - timedelta(days=7)
 
     async with async_session() as session:
@@ -39,12 +48,10 @@ async def load_state(state: GraphState) -> GraphState:
         if not goal_row:
             raise ValueError("No active goal")
 
-        mode = {"constraint_level": "observer", "strategic_state": "locked"}
-
         rows = await session.scalars(
             select(Execution)
             .where(Execution.goal_id == goal_row.id)
-            .where(Execution.day >= start.isoformat())
+            .where(Execution.day >= start)
             .order_by(Execution.day.desc())
         )
         last7 = [{"date": r.day, "status": "done" if r.executed else "miss"} for r in rows.all()]
@@ -52,29 +59,10 @@ async def load_state(state: GraphState) -> GraphState:
     return {
         **state,
         "goal": {"id": goal_row.id, "title": goal_row.text},
-        "mode": mode,
         "last7": last7,
     }
 
 
-# ---------- 2. apply_rules ----------
-async def apply_rules(state: GraphState) -> GraphState:
-    last7 = state.get("last7", [])
-    mode = state.get("mode", {})
-    misses = sum(1 for e in last7 if e.get("status") == "miss")
-    stabilization = misses >= 3
-    constraints = {
-        "constraint_level": mode.get("constraint_level", "observer"),
-        "stabilization": stabilization,
-        "difficulty_cap": 4 if stabilization else 8,
-        "max_micro_steps": 3,
-        "time_budget_cap": 60 if stabilization else 120,
-    }
-    state["constraints"] = constraints
-    return state
-
-
-# ---------- 3. plan_with_llm ----------
 async def plan_with_llm(state: GraphState) -> GraphState:
     goal = state["goal"]
     constraints = state["constraints"]
@@ -84,20 +72,17 @@ async def plan_with_llm(state: GraphState) -> GraphState:
         f"Goal: {goal['title']}\nRecent 3 days:\n{recent}\n"
         f"Constraints: difficulty ≤ {constraints['difficulty_cap']}, "
         f"time ≤ {constraints['time_budget_cap']} min, "
-        f"stabilization={constraints['stabilization']}, "
-        f"max_micro_steps={constraints['max_micro_steps']}.\n"
+        f"stabilization={constraints['stabilization']}.\n"
         "Produce exactly one concrete daily objective that obeys these limits."
     )
-    ai_output = await plan_daily_objective(prompt)
-    state["ai_objective"] = ai_output
+    state["ai_objective"] = await plan_daily_objective(prompt)
     return state
 
 
-# ---------- 4. validate_and_store ----------
 async def validate_and_store(state: GraphState) -> GraphState:
     raw = state.get("ai_objective", {})
     goal = state["goal"]
-    today = date.fromisoformat(state["today"])
+    today = state["today"]
 
     try:
         obj = DailyObjectiveSchema.model_validate(raw)
@@ -114,7 +99,7 @@ async def validate_and_store(state: GraphState) -> GraphState:
     async with async_session() as session:
         stored = DailyObjective(
             goal_id=goal["id"],
-            day=today.isoformat(),
+            day=today,
             primary_objective=obj.primary_objective,
             micro_steps=obj.micro_steps,
             time_budget_minutes=obj.time_budget_minutes,
@@ -126,11 +111,20 @@ async def validate_and_store(state: GraphState) -> GraphState:
         await session.commit()
         await session.refresh(stored)
 
-    state["stored_objective"] = stored
+    state["stored_objective"] = {
+        "id": stored.id,
+        "goal_id": stored.goal_id,
+        "day": stored.day.isoformat(),
+        "primary_objective": stored.primary_objective,
+        "micro_steps": stored.micro_steps,
+        "time_budget_minutes": stored.time_budget_minutes,
+        "success_criteria": stored.success_criteria,
+        "difficulty": stored.difficulty,
+        "adjustment_reason": stored.adjustment_reason,
+    }
     return state
 
 
-# ---------- wire & run ----------
 def build_daily_objective_graph() -> StateGraph:
     g = StateGraph(GraphState)
     g.add_node("load_state", load_state)
@@ -146,6 +140,6 @@ def build_daily_objective_graph() -> StateGraph:
 
 daily_objective_app = build_daily_objective_graph()
 
-async def run_daily_objective(user_id: int, today_iso: str) -> Dict[str, Any]:
-    final = await daily_objective_app.ainvoke({"user_id": user_id, "today": today_iso})
+async def run_daily_objective(user_id: int, today: date) -> Dict[str, Any]:
+    final = await daily_objective_app.ainvoke({"user_id": user_id, "today": today})
     return final["stored_objective"]
