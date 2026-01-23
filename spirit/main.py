@@ -2,11 +2,10 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from spirit.config import settings
 from spirit.db import create_db_and_tables
-from spirit.api import auth, goals, trajectory, strategic
+from spirit.api import auth, goals, trajectory, strategic, anchors
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    # never auto-create tables in prod
     if settings.env != "prod":
         await create_db_and_tables()
     yield
@@ -14,17 +13,31 @@ async def lifespan(_: FastAPI):
 app = FastAPI(
     title="Spirit",
     description="Continuity ledger for human intention",
-    version="0.1.0",
+    version="0.2.0",
     lifespan=lifespan,
 )
 
-# root probe
 @app.get("/")
 def read_root():
     return {"message": "Spirit continuity ledger is running", "docs": "/docs"}
+
+@app.get("/continuity")
+async def continuity():
+    """
+    Public proof of continuity: oldest execution timestamp.
+    """
+    from datetime import date
+    from sqlalchemy import select, func
+    from spirit.db import async_session
+    from spirit.models import Execution
+
+    async with async_session() as session:
+        oldest = await session.scalar(select(func.min(Execution.day)))
+    return {"oldest_execution": oldest.isoformat() if oldest else None}
 
 # routers
 app.include_router(auth.router, prefix="/api", tags=["auth"])
 app.include_router(goals.router, prefix="/api", tags=["goals"])
 app.include_router(trajectory.router, prefix="/api", tags=["trajectory"])
 app.include_router(strategic.router, prefix="/api", tags=["strategic"])
+app.include_router(anchors.router, prefix="/api", tags=["anchors"])
