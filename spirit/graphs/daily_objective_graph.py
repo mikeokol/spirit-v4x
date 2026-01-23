@@ -1,11 +1,12 @@
 """
-Daily-objective generation state-machine with Reality-Anchor policy.
+Daily-objective generation state-machine with Reality-Anchor policy + LangSmith traces.
 """
 from datetime import date, timedelta
 from typing import Any, Dict, Optional
 from langgraph.graph import StateGraph, END
 from typing_extensions import TypedDict
 from sqlalchemy import select
+from langsmith import traceable
 from spirit.db import async_session
 from spirit.models import Goal, GoalState, Execution, DailyObjective, RealityAnchor
 from spirit.schemas.daily_objective import DailyObjectiveSchema
@@ -27,6 +28,7 @@ class GraphState(TypedDict):
     stored_objective: Optional[Dict[str, Any]]
 
 
+@traceable(run_type="chain", name="apply_rules")
 def apply_rules(state: GraphState) -> GraphState:
     last7 = state.get("last7", [])
     misses = sum(1 for e in last7 if e.get("status") == "miss")
@@ -34,7 +36,6 @@ def apply_rules(state: GraphState) -> GraphState:
     drivers = state["drivers"]
     bottleneck = state["bottleneck"]
 
-    # difficulty/time cap based on bottleneck + stabilization
     if stabilization:
         difficulty_cap, time_cap = 2, 30
     elif bottleneck == "lead_gen":
@@ -54,6 +55,7 @@ def apply_rules(state: GraphState) -> GraphState:
     return state
 
 
+@traceable(run_type="chain", name="load_state")
 async def load_state(state: GraphState) -> GraphState:
     user_id = state["user_id"]
     today = state["today"]
@@ -80,9 +82,8 @@ async def load_state(state: GraphState) -> GraphState:
                 weekly_close_target=anchor_row.weekly_close_target,
             )
             drivers = driver_math(anchor)
-            bottleneck = bottleneck_pick(last7=[], drivers=drivers)  # no history yet
+            bottleneck = bottleneck_pick(last7=[], drivers=drivers)
         else:
-            # Days 1-3: create anchors
             anchor = None
             drivers = None
             bottleneck = "anchor_creation"
@@ -105,6 +106,7 @@ async def load_state(state: GraphState) -> GraphState:
     }
 
 
+@traceable(run_type="llm", name="plan_with_llm")
 async def plan_with_llm(state: GraphState) -> GraphState:
     goal = state["goal"]
     constraints = state["constraints"]
@@ -131,6 +133,7 @@ async def plan_with_llm(state: GraphState) -> GraphState:
     return state
 
 
+@traceable(run_type="chain", name="validate_and_store")
 async def validate_and_store(state: GraphState) -> GraphState:
     raw = state.get("ai_objective", {})
     goal = state["goal"]
