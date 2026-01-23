@@ -13,7 +13,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(
     title="Spirit",
     description="Continuity ledger for human intention",
-    version="0.3.0",
+    version="0.4.0",
     lifespan=lifespan,
 )
 
