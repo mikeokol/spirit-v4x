@@ -1,12 +1,13 @@
 from datetime import datetime, date
 from enum import Enum
 from typing import Optional, List
+from uuid import UUID
 from sqlmodel import Field, SQLModel
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy import Column
 
 class User(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
+    id: Optional[UUID] = Field(default=None, primary_key=True)
     email: str = Field(unique=True, index=True)
     hashed_password: str
     created_at: datetime = Field(default_factory=datetime.utcnow)
@@ -22,8 +23,8 @@ class Complexity(str, Enum):
     high = "high"
 
 class Goal(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    user_id: int = Field(foreign_key="user.id")
+    id: Optional[UUID] = Field(default=None, primary_key=True)
+    user_id: UUID = Field(index=True)
     text: str
     complexity: Complexity = Complexity.medium
     created_at: datetime = Field(default_factory=datetime.utcnow)
@@ -32,21 +33,20 @@ class Goal(SQLModel, table=True):
     days_active: int = 0
     last_metric_update: datetime = Field(default_factory=datetime.utcnow)
 
-# NEW: calibration profile for the goal
 class GoalProfile(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    goal_id: int = Field(foreign_key="goal.id", unique=True)
-    time_budget_weekly: int  # hours
-    money_budget_monthly: Optional[int] = None  # cents
-    constraints: List[str] = Field(sa_column=Column(JSONB))  # enum list
+    id: Optional[UUID] = Field(default=None, primary_key=True)
+    goal_id: UUID = Field(foreign_key="goal.id", unique=True)
+    time_budget_weekly: int
+    money_budget_monthly: Optional[int] = None
+    constraints: List[str] = Field(sa_column=Column(JSONB))
     starting_point: str
     success_definition: str
     confidence: Optional[int] = Field(None, ge=1, le=10)
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 class RealityAnchor(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    goal_id: int = Field(foreign_key="goal.id", unique=True)
+    id: Optional[UUID] = Field(default=None, primary_key=True)
+    goal_id: UUID = Field(foreign_key="goal.id", unique=True)
     offer: str
     target_customer: str
     channel: str
@@ -57,16 +57,16 @@ class RealityAnchor(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 class Execution(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    goal_id: int = Field(foreign_key="goal.id")
+    id: Optional[UUID] = Field(default=None, primary_key=True)
+    goal_id: UUID = Field(foreign_key="goal.id")
     day: date = Field(index=True)
     objective_text: str
     executed: bool
     logged_at: datetime = Field(default_factory=datetime.utcnow)
 
 class DailyObjective(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    goal_id: int = Field(foreign_key="goal.id")
+    id: Optional[UUID] = Field(default=None, primary_key=True)
+    goal_id: UUID = Field(foreign_key="goal.id")
     day: date = Field(unique=True, index=True)
     primary_objective: str
     micro_steps: List[str] = Field(sa_column=Column(JSONB))
