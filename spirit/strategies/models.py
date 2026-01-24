@@ -1,14 +1,16 @@
+from __future__ import annotations
+
 from datetime import date as dt_date
-from pydantic import BaseModel
-from typing import List, Optional, Literal
+from pydantic import BaseModel, Field
+from typing import List, Literal, Optional
+from uuid import UUID
 
 Status = Literal["done", "miss", "partial"]
 
 class ExecutionSummary(BaseModel):
     day: dt_date
     status: Status
-    signal: Optional[int] = None  # 0-10 business signal strength
-
+    signal: Optional[int] = Field(None, ge=0, le=10, description="Business signal strength 0-10")
 
 class ReviewResult(BaseModel):
     decision: Literal["continue", "stabilize", "pivot"]
