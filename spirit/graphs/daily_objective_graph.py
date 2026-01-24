@@ -1,11 +1,11 @@
 """
-Daily-objective generation state-machine with Reality-Anchor policy + LangSmith traces.
+Daily-objective generation state-machine with full guardrails.
 """
 from datetime import date, timedelta
 from typing import Any, Dict, Optional
 from langgraph.graph import StateGraph, END
 from typing_extensions import TypedDict
-from sqlalchemy import select
+from sqlalchemy import select, func
 from langsmith import traceable
 from spirit.db import async_session
 from spirit.models import Goal, GoalState, Execution, DailyObjective, RealityAnchor, GoalProfile
@@ -14,13 +14,15 @@ from spirit.schemas.reality_anchor import RealityAnchorSchema
 from spirit.services.openai_client import plan_daily_objective
 from spirit.services.decomposer import driver_math, bottleneck_pick
 from spirit.services.calibrator import build_prompt
+import logging
 
+logger = logging.getLogger("spirit")
 
 class GraphState(TypedDict):
-    user_id: int
+    user_id: UUID
     today: date
     goal: Optional[Dict[str, Any]]
-    profile: Optional[Dict[str, Any]]  # goal_profile
+    profile: Optional[Dict[str, Any]]
     anchor: Optional[RealityAnchorSchema]
     drivers: Optional[Dict[str, float]]
     bottleneck: Optional[str]
@@ -147,6 +149,22 @@ async def validate_and_store(state: GraphState) -> GraphState:
         )
 
     async with async_session() as session:
+        # Guardrail 9: idempotent get-or-create
+        existing = await session.scalar(select(DailyObjective).where(DailyObjective.goal_id == goal["id"], DailyObjective.day == today))
+        if existing:
+            state["stored_objective"] = {
+                "id": existing.id,
+                "goal_id": existing.goal_id,
+                "day": existing.day.isoformat(),
+                "primary_objective": existing.primary_objective,
+                "micro_steps": existing.micro_steps,
+                "time_budget_minutes": existing.time_budget_minutes,
+                "success_criteria": existing.success_criteria,
+                "difficulty": existing.difficulty,
+                "adjustment_reason": existing.adjustment_reason,
+            }
+            return state
+
         stored = DailyObjective(
             goal_id=goal["id"],
             day=today,
@@ -156,6 +174,7 @@ async def validate_and_store(state: GraphState) -> GraphState:
             success_criteria=obj.success_criteria,
             difficulty=obj.difficulty,
             adjustment_reason=obj.adjustment_reason,
+            ai_objective_json=raw,  # Guardrail 22
         )
         session.add(stored)
         await session.commit()
@@ -190,6 +209,6 @@ def build_daily_objective_graph() -> StateGraph:
 
 daily_objective_app = build_daily_objective_graph()
 
-async def run_daily_objective(user_id: int, today: date) -> Dict[str, Any]:
+async def run_daily_objective(user_id: UUID, today: date) -> Dict[str, Any]:
     final = await daily_objective_app.ainvoke({"user_id": user_id, "today": today})
     return final["stored_objective"]
