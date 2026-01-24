@@ -10,6 +10,7 @@ class User(SQLModel, table=True):
     id: Optional[UUID] = Field(default=None, primary_key=True)
     email: str = Field(unique=True, index=True)
     hashed_password: str
+    timezone: str = Field(default="UTC")  # Guardrail 7
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 class GoalState(str, Enum):
@@ -74,4 +75,5 @@ class DailyObjective(SQLModel, table=True):
     success_criteria: str
     difficulty: int
     adjustment_reason: Optional[str] = None
+    ai_objective_json: Optional[Dict] = Field(None, sa_column=Column(JSONB))  # Guardrail 22
     created_at: datetime = Field(default_factory=datetime.utcnow)
