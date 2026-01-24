@@ -1,5 +1,5 @@
 """
-Daily-objective generation state-machine with full guardrails.
+Daily-objective generation state-machine with Reality-Anchor policy + LangSmith traces.
 """
 from datetime import date, timedelta
 from typing import Any, Dict, Optional
@@ -8,12 +8,14 @@ from typing_extensions import TypedDict
 from sqlalchemy import select, func
 from langsmith import traceable
 from spirit.db import async_session
-from spirit.models import Goal, GoalState, Execution, DailyObjective, RealityAnchor, GoalProfile
+from spirit.models import Goal, GoalState, Execution, DailyObjective, RealityAnchor, GoalProfile, ModeState
 from spirit.schemas.daily_objective import DailyObjectiveSchema
 from spirit.schemas.reality_anchor import RealityAnchorSchema
 from spirit.services.openai_client import plan_daily_objective
 from spirit.services.decomposer import driver_math, bottleneck_pick
 from spirit.services.calibrator import build_prompt
+from spirit.strategies.library import STRATEGIES, DEFAULT_STRATEGY_BY_DOMAIN
+from uuid import UUID
 import logging
 
 logger = logging.getLogger("spirit")
@@ -22,10 +24,11 @@ class GraphState(TypedDict):
     user_id: UUID
     today: date
     goal: Optional[Dict[str, Any]]
-    profile: Optional[Dict[str, Any]]
+    profile: Optional[Dict[str, Any]]  # goal_profile
     anchor: Optional[RealityAnchorSchema]
     drivers: Optional[Dict[str, float]]
     bottleneck: Optional[str]
+    strategy_key: Optional[str]  # <-- NEW
     last7: list[Dict[str, Any]]
     constraints: Optional[Dict[str, Any]]
     ai_objective: Optional[Dict[str, Any]]
@@ -91,6 +94,15 @@ async def load_state(state: GraphState) -> GraphState:
             drivers = None
             bottleneck = "anchor_creation"
 
+        # NEW: load strategy from ModeState
+        mode_row = await session.scalar(select(ModeState).where(ModeState.user_id == user_id))
+        if mode_row and mode_row.strategy_key:
+            strategy_key = mode_row.strategy_key
+        else:
+            # infer from goal text or default
+            domain = mode_row.domain if mode_row and mode_row.domain else "business"
+            strategy_key = DEFAULT_STRATEGY_BY_DOMAIN[domain]
+
         rows = await session.scalars(
             select(Execution)
             .where(Execution.goal_id == goal_row.id)
@@ -106,6 +118,7 @@ async def load_state(state: GraphState) -> GraphState:
         "anchor": anchor,
         "drivers": drivers,
         "bottleneck": bottleneck,
+        "strategy_key": strategy_key,
         "last7": last7,
     }
 
@@ -116,6 +129,10 @@ async def plan_with_llm(state: GraphState) -> GraphState:
     constraints = state["constraints"]
     profile = state["profile"]
     bottleneck = constraints["bottleneck"]
+    strategy_key = state["strategy_key"]
+    card = STRATEGIES[strategy_key]
+
+    recent = "\n".join(f"- {e['date']}: {e['status']}" for e in state["last7"][:3])
 
     if profile is None:
         prompt = (
@@ -123,7 +140,17 @@ async def plan_with_llm(state: GraphState) -> GraphState:
             "Create ONE objective that helps the user finish calibration (≤2 min)."
         )
     else:
-        prompt = build_prompt(profile, goal["title"], bottleneck)
+        prompt = (
+            f"Goal: {goal['title']}\n"
+            f"Strategy: {card.name}\n"
+            f"Hypothesis: {card.hypothesis}\n"
+            f"Signals to log today (in proof.signals): {', '.join(card.signals)}\n"
+            f"Recent 3 days:\n{recent}\n"
+            f"Constraints: difficulty ≤ {constraints['difficulty_cap']}, time ≤ {constraints['time_budget_cap']} min, "
+            f"stabilization={constraints['stabilization']}, max_micro_steps={constraints['max_micro_steps']}.\n"
+            "Produce exactly one concrete daily objective that obeys these limits.\n"
+            "It must include a success criteria that can be verified today."
+        )
 
     ai_output = await plan_daily_objective(prompt)
     state["ai_objective"] = ai_output
@@ -178,7 +205,7 @@ async def validate_and_store(state: GraphState) -> GraphState:
         )
         session.add(stored)
         await session.commit()
-        await session.refresh(stored)
+        await db.refresh(stored)
 
     state["stored_objective"] = {
         "id": stored.id,
