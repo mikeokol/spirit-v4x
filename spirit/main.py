@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from spirit.config import settings
 from spirit.db import create_db_and_tables
-from spirit.api import auth, goals, trajectory, strategic, anchors, calibrate
+from spirit.api import auth, goals, trajectory, strategic, anchors, calibrate, debug_trace
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
@@ -13,7 +13,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(
     title="Spirit",
     description="Continuity ledger for human intention",
-    version="0.5.0",
+    version="0.7.1",
     lifespan=lifespan,
 )
 
@@ -39,3 +39,4 @@ app.include_router(trajectory.router, prefix="/api", tags=["trajectory"])
 app.include_router(strategic.router, prefix="/api", tags=["strategic"])
 app.include_router(anchors.router, prefix="/api", tags=["anchors"])
 app.include_router(calibrate.router, prefix="/api", tags=["calibrate"])
+app.include_router(debug_trace.router, prefix="/api", tags=["debug"])
