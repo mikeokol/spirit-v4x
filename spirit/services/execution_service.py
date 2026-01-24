@@ -1,27 +1,45 @@
-from datetime import date
+from datetime import date as dt_date
+from typing import Optional, Dict
+from uuid import UUID
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from spirit.models import Execution
 
-async def log_execution(
+async def upsert_execution(
     db: AsyncSession,
-    goal_id: int,
-    day: date,
-    objective_text: str,
-    executed: bool,
+    *,
+    user_id: UUID,
+    goal_id: UUID,
+    daily_objective_id: UUID,
+    day: dt_date,
+    status: str,  # 'done' | 'miss' | 'partial'
+    proof: Optional[Dict] = None,
 ) -> Execution:
-    # Upsert: one row per day
-    existing = await db.get(Execution, (goal_id, day))
-    if existing:
-        existing.objective_text = objective_text
-        existing.executed = executed
-    else:
-        existing = Execution(
+    """
+    Postgres-native UPSERT on unique (daily_objective_id).
+    Idempotent under retries.
+    """
+    stmt = (
+        insert(Execution)
+        .values(
+            user_id=user_id,
             goal_id=goal_id,
+            daily_objective_id=daily_objective_id,
             day=day,
-            objective_text=objective_text,
-            executed=executed,
+            executed=(status == "done"),
+            objective_text=proof.get("objective_text", "") if proof else "",
+            logged_at=dt_date.today(),
         )
-        db.add(existing)
+        .on_conflict_do_update(
+            index_elements=[Execution.daily_objective_id],
+            set_={
+                "executed": (status == "done"),
+                "objective_text": proof.get("objective_text", "") if proof else "",
+                "logged_at": dt_date.today(),
+            },
+        )
+        .returning(Execution)
+    )
+    res = await db.execute(stmt)
     await db.commit()
-    await db.refresh(existing)
-    return existing
+    return res.scalar_one()
