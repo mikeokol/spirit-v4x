@@ -236,6 +236,10 @@ def build_daily_objective_graph() -> StateGraph:
 
 daily_objective_app = build_daily_objective_graph()
 
+@traceable(name="run_daily_objective")
 async def run_daily_objective(user_id: UUID, today: date) -> Dict[str, Any]:
-    final = await daily_objective_app.ainvoke({"user_id": user_id, "today": today})
+    final = await daily_objective_app.ainvoke(
+        {"user_id": user_id, "today": today},
+        config={"tags": ["spirit", "daily_objective"], "metadata": {"user_id": str(user_id), "today": str(today)}},
+    )
     return final["stored_objective"]
