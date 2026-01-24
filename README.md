@@ -1,13 +1,15 @@
-# Spirit Backend v0.6  –  Continuity Ledger with Strategy Engine
+# Spirit Backend v0.7  –  Continuity Ledger with Strategy Engine + LangSmith Trace
 
 ## What’s new
-- **Strategy Engine** – 12 deterministic strategy cards (business, career, fitness, creator)  
+- **LangSmith trace decorator** on `run_daily_objective` – full observability of every generation run  
+- **Strategy-aware daily objectives** – each prompt includes active strategy card + required signal keys  
+- **UUID keys** – aligned with Supabase Auth  
+- **Calibration Mode** – 3–5 question profile before any plan is generated  
 - **Weekly Review** – `/api/strategic/review` pivots strategy based on 7-day signals  
 - **Goal Switch Guardrail** – activating a new goal resets strategic mode  
-- **Strategy-aware daily objectives** – each objective includes required signal keys to log  
 
 ## Stack
-Python 3.12 + FastAPI + SQLModel + Postgres + LangGraph + OpenAI Structured Outputs  
+Python 3.12 + FastAPI + SQLModel + Postgres + LangGraph + OpenAI Structured Outputs + LangSmith  
 
 ## Quick start
 ```bash
