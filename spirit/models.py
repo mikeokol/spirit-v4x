@@ -10,7 +10,7 @@ class User(SQLModel, table=True):
     id: Optional[UUID] = Field(default=None, primary_key=True)
     email: str = Field(unique=True, index=True)
     hashed_password: str
-    timezone: str = Field(default="UTC")  # Guardrail 7
+    timezone: str = Field(default="UTC")
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 class GoalState(str, Enum):
@@ -28,6 +28,7 @@ class Goal(SQLModel, table=True):
     user_id: UUID = Field(index=True)
     text: str
     complexity: Complexity = Complexity.medium
+    domain: Optional[str] = Field(None, description="business|career|fitness|creator")
     created_at: datetime = Field(default_factory=datetime.utcnow)
     state: GoalState = GoalState.active
     execution_rate: float = 0.0
@@ -75,5 +76,24 @@ class DailyObjective(SQLModel, table=True):
     success_criteria: str
     difficulty: int
     adjustment_reason: Optional[str] = None
-    ai_objective_json: Optional[Dict] = Field(None, sa_column=Column(JSONB))  # Guardrail 22
+    ai_objective_json: Optional[dict] = Field(None, sa_column=Column(JSONB))
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+# NEW: ModeState for strategic mode
+class ModeState(str, Enum):
+    locked = "locked"
+    testing = "testing"
+    stabilizing = "stabilizing"
+
+class ModeState(SQLModel, table=True):
+    id: Optional[UUID] = Field(default=None, primary_key=True)
+    user_id: UUID = Field(unique=True)
+    constraint_level: str = Field(default="observer")
+    strategic_enabled: bool = Field(default=False)
+    strategic_state: ModeState = ModeState.locked
+    domain: Optional[str] = None
+    strategy_key: Optional[str] = None
+    strategy_started_at: Optional[datetime] = None
+    last_reviewed_at: Optional[datetime] = None
+    execution_rate_30d: Optional[float] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
