@@ -1,11 +1,10 @@
-# Spirit Backend v0.4  –  Continuity Ledger with Calibration Mode
+# Spirit Backend v0.6  –  Continuity Ledger with Strategy Engine
 
 ## What’s new
-- **UUID primary keys** – aligned with Supabase Auth  
-- **Calibration Mode** – 3–5 question profile before any plan is generated  
-- **Reality-Anchor policy** – driver math + bottleneck pick → daily objective  
-- **LangSmith traces** – every node + LLM call observable  
-- **Guardrails 1–22** – ownership, idempotency, date safety, fallback logic  
+- **Strategy Engine** – 12 deterministic strategy cards (business, career, fitness, creator)  
+- **Weekly Review** – `/api/strategic/review` pivots strategy based on 7-day signals  
+- **Goal Switch Guardrail** – activating a new goal resets strategic mode  
+- **Strategy-aware daily objectives** – each objective includes required signal keys to log  
 
 ## Stack
 Python 3.12 + FastAPI + SQLModel + Postgres + LangGraph + OpenAI Structured Outputs  
