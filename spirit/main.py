@@ -1,8 +1,9 @@
 """
 Spirit Behavioral Research Agent - Main Application
-Continuity ledger + Behavioral research + Causal inference + Goal integration + Intelligence + Memory + Proactive Agent Loop
+Continuity ledger + Behavioral research + Causal inference + Goal integration + Intelligence + Memory + Proactive Agent Loop + Real-time Processing + Advanced Causal Discovery
 """
 
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -19,7 +20,9 @@ from spirit.api.intelligence import router as intelligence_router
 from spirit.api.memory import router as memory_router
 from spirit.api.delivery import router as delivery_router
 from spirit.api.proactive import router as proactive_router
+from spirit.api.realtime_causal import router as realtime_causal_router
 from spirit.agents.proactive_loop import get_orchestrator
+from spirit.streaming.realtime_pipeline import get_stream_processor
 
 
 @asynccontextmanager
@@ -44,7 +47,17 @@ async def lifespan(app: FastAPI):
     orchestrator = get_orchestrator()
     print("Global proactive orchestrator initialized")
     
+    # Start real-time stream processor
+    processor = get_stream_processor()
+    asyncio.create_task(processor.start())
+    print("Real-time stream processor started (sub-second anomaly detection)")
+    
     yield
+    
+    # Cleanup: stop stream processor
+    print("Stopping stream processor...")
+    processor = get_stream_processor()
+    processor.stop()
     
     # Cleanup: stop all proactive loops
     print("Shutting down proactive loops...")
@@ -59,8 +72,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Spirit",
-    description="Continuity ledger + Behavioral research engine + Causal inference + Goal integration + Intelligence + Memory + Proactive Agent Loop",
-    version="1.2.0",  # Added proactive agent loop
+    description="Continuity ledger + Behavioral research engine + Causal inference + Goal integration + Intelligence + Memory + Proactive Agent Loop + Real-time Processing + Advanced Causal Discovery",
+    version="1.3.0",  # Added real-time processing and advanced causal discovery
     lifespan=lifespan,
 )
 
@@ -78,7 +91,7 @@ def read_root():
     return {
         "message": "Spirit continuity ledger is running",
         "docs": "/docs",
-        "version": "1.2.0",
+        "version": "1.3.0",
         "features": {
             "continuity_ledger": True,
             "behavioral_ingestion": bool(settings.supabase_url),
@@ -87,7 +100,9 @@ def read_root():
             "intelligence_engine": bool(settings.openai_api_key),
             "memory_system": bool(settings.supabase_url),
             "delivery_system": bool(settings.supabase_url),
-            "proactive_loop": bool(settings.supabase_url)
+            "proactive_loop": bool(settings.supabase_url),
+            "realtime_processing": bool(settings.supabase_url),
+            "advanced_causal_discovery": bool(settings.openai_api_key) and bool(settings.supabase_url)
         }
     }
 
@@ -131,3 +146,6 @@ app.include_router(delivery_router)
 
 # NEW: Proactive agent loop (autonomous predictions & interventions)
 app.include_router(proactive_router)
+
+# NEW: Real-time processing + Advanced causal discovery
+app.include_router(realtime_causal_router)
