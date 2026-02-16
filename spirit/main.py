@@ -1,6 +1,6 @@
 """
 Spirit Behavioral Research Agent - Main Application
-Continuity ledger + Behavioral data ingestion layer
+Continuity ledger + Behavioral research engine + Causal inference
 """
 
 from contextlib import asynccontextmanager
@@ -13,6 +13,7 @@ from spirit.db import create_db_and_tables
 from spirit.db.supabase_client import close_behavioral_store
 from spirit.api import auth, goals, trajectory, strategic, anchors, calibrate, debug_trace
 from spirit.api.ingestion import router as ingestion_router
+from spirit.api.causal import router as causal_router
 
 
 @asynccontextmanager
@@ -42,12 +43,12 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Spirit",
-    description="Continuity ledger for human intention + Behavioral research engine",
-    version="0.8.0",  # Bumped for ingestion feature
+    description="Continuity ledger for human intention + Behavioral research engine + Causal inference",
+    version="0.9.0",  # Bumped for causal inference
     lifespan=lifespan,
 )
 
-# CORS middleware (added for mobile app communication)
+# CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
@@ -61,10 +62,11 @@ def read_root():
     return {
         "message": "Spirit continuity ledger is running",
         "docs": "/docs",
-        "version": "0.8.0",
+        "version": "0.9.0",
         "features": {
             "continuity_ledger": True,
-            "behavioral_ingestion": bool(settings.supabase_url)
+            "behavioral_ingestion": bool(settings.supabase_url),
+            "causal_inference": bool(settings.supabase_url)
         }
     }
 
@@ -89,4 +91,7 @@ app.include_router(calibrate.router, prefix="/api", tags=["calibrate"])
 app.include_router(debug_trace.router, prefix="/api", tags=["debug"])
 
 # NEW: Behavioral data ingestion router
-app.include_router(ingestion_router)  # Already has /v1/ingestion prefix
+app.include_router(ingestion_router)
+
+# NEW: Causal inference router
+app.include_router(causal_router)
