@@ -1,3 +1,6 @@
+# ==========================================
+# CORE FRAMEWORK (Existing - Preserved)
+# ==========================================
 fastapi==0.111.0
 uvicorn[standard]==0.29.0
 sqlmodel==0.0.18
@@ -10,6 +13,26 @@ alembic==1.13.1
 pytest==8.1.1
 httpx==0.27.0
 python-dotenv==1.0.1
+
+# ==========================================
+# AI/LLM INTEGRATION (Existing - Preserved)
+# ==========================================
 openai==1.59.3
 langgraph==0.2.27
 langsmith==0.1.147
+
+# ==========================================
+# BEHAVIORAL DATA INGESTION (New)
+# ==========================================
+
+# Supabase client for behavioral data storage
+supabase==2.6.0
+
+# Time-series handling (optional but recommended)
+# pandas==2.2.0  # Uncomment if you need data analysis
+
+# WebSocket support for real-time mobile sync
+websockets==12.0
+
+# Additional utilities for data processing
+ujson==5.9.0  # Faster JSON parsing for high-volume ingestion
