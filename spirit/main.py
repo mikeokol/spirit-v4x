@@ -1,6 +1,6 @@
 """
 Spirit Behavioral Research Agent - Main Application
-Continuity ledger + Behavioral research engine + Causal inference
+Continuity ledger + Behavioral research + Causal inference + Goal integration
 """
 
 from contextlib import asynccontextmanager
@@ -14,11 +14,12 @@ from spirit.db.supabase_client import close_behavioral_store
 from spirit.api import auth, goals, trajectory, strategic, anchors, calibrate, debug_trace
 from spirit.api.ingestion import router as ingestion_router
 from spirit.api.causal import router as causal_router
+from spirit.api.behavioral_goals import router as behavioral_goals_router
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Manage application lifecycle - SQLite + Supabase behavioral store."""
+    """Manage application lifecycle."""
     
     # Initialize SQLite (existing behavior)
     if settings.env != "prod":
@@ -43,8 +44,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Spirit",
-    description="Continuity ledger for human intention + Behavioral research engine + Causal inference",
-    version="0.9.0",  # Bumped for causal inference
+    description="Continuity ledger + Behavioral research engine + Causal inference + Goal integration",
+    version="1.0.0",  # Full release with behavioral layer
     lifespan=lifespan,
 )
 
@@ -62,11 +63,12 @@ def read_root():
     return {
         "message": "Spirit continuity ledger is running",
         "docs": "/docs",
-        "version": "0.9.0",
+        "version": "1.0.0",
         "features": {
             "continuity_ledger": True,
             "behavioral_ingestion": bool(settings.supabase_url),
-            "causal_inference": bool(settings.supabase_url)
+            "causal_inference": bool(settings.supabase_url),
+            "goal_integration": bool(settings.supabase_url)
         }
     }
 
@@ -90,8 +92,11 @@ app.include_router(anchors.router, prefix="/api", tags=["anchors"])
 app.include_router(calibrate.router, prefix="/api", tags=["calibrate"])
 app.include_router(debug_trace.router, prefix="/api", tags=["debug"])
 
-# NEW: Behavioral data ingestion router
+# NEW: Behavioral data ingestion
 app.include_router(ingestion_router)
 
-# NEW: Causal inference router
+# NEW: Causal inference
 app.include_router(causal_router)
+
+# NEW: Goal-behavior integration
+app.include_router(behavioral_goals_router)
