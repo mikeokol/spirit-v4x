@@ -1,6 +1,6 @@
 """
 Spirit Behavioral Research Agent - Main Application
-Continuity ledger + Behavioral research + Causal inference + Goal integration + Intelligence + Memory
+Continuity ledger + Behavioral research + Causal inference + Goal integration + Intelligence + Memory + Proactive Agent Loop
 """
 
 from contextlib import asynccontextmanager
@@ -17,6 +17,9 @@ from spirit.api.causal import router as causal_router
 from spirit.api.behavioral_goals import router as behavioral_goals_router
 from spirit.api.intelligence import router as intelligence_router
 from spirit.api.memory import router as memory_router
+from spirit.api.delivery import router as delivery_router
+from spirit.api.proactive import router as proactive_router
+from spirit.agents.proactive_loop import get_orchestrator
 
 
 @asynccontextmanager
@@ -37,17 +40,27 @@ async def lifespan(app: FastAPI):
         else:
             print("Supabase URL configured but connection failed - ingestion disabled")
     
+    # Initialize global proactive orchestrator
+    orchestrator = get_orchestrator()
+    print("Global proactive orchestrator initialized")
+    
     yield
     
-    # Cleanup
+    # Cleanup: stop all proactive loops
+    print("Shutting down proactive loops...")
+    orchestrator = get_orchestrator()
+    for user_id in list(orchestrator.user_loops.keys()):
+        orchestrator.stop_user_loop(user_id)
+    
+    # Cleanup database connections
     print("Spirit shutting down...")
     await close_behavioral_store()
 
 
 app = FastAPI(
     title="Spirit",
-    description="Continuity ledger + Behavioral research engine + Causal inference + Goal integration + Intelligence + Memory",
-    version="1.1.0",  # Added intelligence and memory layers
+    description="Continuity ledger + Behavioral research engine + Causal inference + Goal integration + Intelligence + Memory + Proactive Agent Loop",
+    version="1.2.0",  # Added proactive agent loop
     lifespan=lifespan,
 )
 
@@ -65,14 +78,16 @@ def read_root():
     return {
         "message": "Spirit continuity ledger is running",
         "docs": "/docs",
-        "version": "1.1.0",
+        "version": "1.2.0",
         "features": {
             "continuity_ledger": True,
             "behavioral_ingestion": bool(settings.supabase_url),
             "causal_inference": bool(settings.supabase_url),
             "goal_integration": bool(settings.supabase_url),
             "intelligence_engine": bool(settings.openai_api_key),
-            "memory_system": bool(settings.supabase_url)
+            "memory_system": bool(settings.supabase_url),
+            "delivery_system": bool(settings.supabase_url),
+            "proactive_loop": bool(settings.supabase_url)
         }
     }
 
@@ -110,3 +125,9 @@ app.include_router(intelligence_router)
 
 # NEW: Memory system (episodic + collective)
 app.include_router(memory_router)
+
+# NEW: Delivery system (notifications)
+app.include_router(delivery_router)
+
+# NEW: Proactive agent loop (autonomous predictions & interventions)
+app.include_router(proactive_router)
