@@ -1,6 +1,6 @@
 """
 Spirit Behavioral Research Agent - Main Application
-Continuity ledger + Behavioral research + Causal inference + Goal integration
+Continuity ledger + Behavioral research + Causal inference + Goal integration + Intelligence + Memory
 """
 
 from contextlib import asynccontextmanager
@@ -15,6 +15,8 @@ from spirit.api import auth, goals, trajectory, strategic, anchors, calibrate, d
 from spirit.api.ingestion import router as ingestion_router
 from spirit.api.causal import router as causal_router
 from spirit.api.behavioral_goals import router as behavioral_goals_router
+from spirit.api.intelligence import router as intelligence_router
+from spirit.api.memory import router as memory_router
 
 
 @asynccontextmanager
@@ -44,8 +46,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Spirit",
-    description="Continuity ledger + Behavioral research engine + Causal inference + Goal integration",
-    version="1.0.0",  # Full release with behavioral layer
+    description="Continuity ledger + Behavioral research engine + Causal inference + Goal integration + Intelligence + Memory",
+    version="1.1.0",  # Added intelligence and memory layers
     lifespan=lifespan,
 )
 
@@ -63,12 +65,14 @@ def read_root():
     return {
         "message": "Spirit continuity ledger is running",
         "docs": "/docs",
-        "version": "1.0.0",
+        "version": "1.1.0",
         "features": {
             "continuity_ledger": True,
             "behavioral_ingestion": bool(settings.supabase_url),
             "causal_inference": bool(settings.supabase_url),
-            "goal_integration": bool(settings.supabase_url)
+            "goal_integration": bool(settings.supabase_url),
+            "intelligence_engine": bool(settings.openai_api_key),
+            "memory_system": bool(settings.supabase_url)
         }
     }
 
@@ -100,3 +104,9 @@ app.include_router(causal_router)
 
 # NEW: Goal-behavior integration
 app.include_router(behavioral_goals_router)
+
+# NEW: Intelligence engine (LangGraph agent)
+app.include_router(intelligence_router)
+
+# NEW: Memory system (episodic + collective)
+app.include_router(memory_router)
