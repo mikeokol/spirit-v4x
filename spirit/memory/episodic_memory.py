@@ -310,16 +310,31 @@ class EpisodicMemorySystem:
             return [float((hash_val >> (i * 8)) & 0xFF) / 255.0 for i in range(10)]
     
     async def _store_episode(self, episode: MemoryEpisode):
-        """Store episode in Supabase."""
-        store = await get_behavioral_store()
-        if not store:
-            return
-        
-        data = asdict(episode)
-        data['timestamp'] = episode.timestamp.isoformat()
-        data['embedding'] = str(episode.embedding) if episode.embedding else None
-        
-        store.client.table('episodic_memories').insert(data).execute()
+    """Store episode in Supabase."""
+    store = await get_behavioral_store()
+    if not store:
+        return
+    
+    data = {
+        'episode_id': episode.episode_id,
+        'user_id': episode.user_id,
+        'timestamp': episode.timestamp.isoformat(),
+        'episode_type': episode.episode_type,
+        'what_happened': episode.what_happened,
+        'behavioral_context': episode.behavioral_context,
+        'emotional_valence': episode.emotional_valence,
+        'importance_score': episode.importance_score,
+        'tags': episode.tags,
+        'related_goal_ids': episode.related_goal_ids,
+        'related_hypothesis_ids': episode.related_hypothesis_ids,
+        'lesson_learned': episode.lesson_learned,
+        'user_reflection': episode.user_reflection,
+        'embedding_json': episode.embedding,
+        # Build search text manually
+        'search_text': f"{episode.episode_type} {episode.what_happened} {' '.join(episode.tags)}"
+    }
+    
+    store.client.table('episodic_memories').insert(data).execute()
     
     async def _consolidate_buffer(self):
         """Consolidate short-term buffer into long-term storage."""
