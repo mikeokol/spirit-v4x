@@ -1,6 +1,6 @@
 """
 FastAPI routes for behavioral data ingestion.
-Mobile screen time data endpoint with validation.
+Updated to use privacy filter and enrichment services.
 """
 
 from datetime import datetime, timedelta
@@ -20,6 +20,9 @@ from spirit.models.behavioral import (
     AppCategory,
     EMARequest
 )
+from spirit.services.enrichment import ContextEnricher
+from spirit.services.privacy import PrivacyFilter
+from spirit.services.jitai import JITAIEngine
 
 
 router = APIRouter(prefix="/v1/ingestion", tags=["ingestion"])
@@ -30,13 +33,10 @@ async def verify_device_token(
     credentials: HTTPAuthorizationCredentials = Depends(security)
 ) -> UUID:
     """Verify JWT from mobile edge device."""
-    # TODO: Implement proper JWT validation with jose
-    # For now, extract user_id from sub claim
     try:
         import base64
         import json
         payload = credentials.credentials.split('.')[1]
-        # Add padding if needed
         padding = 4 - len(payload) % 4
         if padding != 4:
             payload += '=' * padding
@@ -52,16 +52,16 @@ async def ingest_screen_sessions(
     sessions: List[ScreenTimeSession],
     background_tasks: BackgroundTasks,
     user_id: UUID = Depends(verify_device_token),
-    store: Optional[SupabaseBehavioralStore] = Depends(get_behavioral_store),
     request: Request = None
 ):
-    """
-    Ingest batch of screen time sessions from mobile edge device.
-    Edge devices aggregate raw OS events before sending.
-    """
+    """Ingest batch of screen time sessions from mobile edge device."""
+    store = await get_behavioral_store()
     if not store:
         raise HTTPException(status_code=503, detail="Data store unavailable")
-        
+    
+    privacy_filter = PrivacyFilter()
+    enricher = ContextEnricher()
+    
     accepted = 0
     rejected = 0
     
@@ -69,15 +69,15 @@ async def ingest_screen_sessions(
         if session.user_id != user_id:
             raise HTTPException(status_code=403, detail="Session user mismatch")
         
-        # Basic validation
-        if not session.app_name_hash or not session.app_category:
+        # Privacy validation
+        if not privacy_filter.validate(session):
             rejected += 1
             continue
-            
-        # Server-side enrichment
-        session.collected_at = datetime.utcnow()
         
-        # Store
+        # Enrichment
+        session = await enricher.enrich_session(session, request)
+        
+        # Store async
         background_tasks.add_task(store.store_screen_session, session)
         accepted += 1
     
@@ -94,52 +94,76 @@ async def ingest_behavioral_observation(
     observation: BehavioralObservation,
     background_tasks: BackgroundTasks,
     user_id: UUID = Depends(verify_device_token),
-    store: Optional[SupabaseBehavioralStore] = Depends(get_behavioral_store),
     request: Request = None
 ):
-    """
-    Ingest single behavioral observation with JITAI evaluation.
-    """
+    """Ingest single behavioral observation with JITAI evaluation."""
+    store = await get_behavioral_store()
     if not store:
         raise HTTPException(status_code=503, detail="Data store unavailable")
-        
+    
     if observation.user_id != user_id:
         raise HTTPException(status_code=403, detail="Observation user mismatch")
     
-    # Server-side timestamp for latency calculation
-    server_received_at = datetime.utcnow()
-    observation.processing_metadata['server_received_at'] = server_received_at.isoformat()
-    observation.processing_metadata['network_latency_ms'] = (
-        server_received_at - observation.timestamp
-    ).total_seconds() * 1000
+    privacy_filter = PrivacyFilter()
+    if not privacy_filter.validate_observation(observation):
+        raise HTTPException(status_code=400, detail="Privacy validation failed")
     
-    # Simple JITAI evaluation
+    # Enrichment
+    enricher = ContextEnricher()
+    observation = await enricher.enrich_observation(
+        observation, 
+        request,
+        datetime.utcnow()
+    )
+    
+    # JITAI evaluation
     if observation.observation_type == ObservationType.SCREEN_TIME_AGGREGATE:
-        # Check for vulnerability signals
-        behavior = observation.behavior
-        if behavior.get('app_switches_5min', 0) > 5:
-            # High switching = potential distraction
-            pass  # TODO: Trigger EMA via background task
+        jitai = JITAIEngine()
+        trigger = await jitai.evaluate_window(user_id, observation)
+        if trigger:
+            background_tasks.add_task(jitai.deliver_ema, user_id, trigger)
     
     await store.store_observation(observation)
     
     return {
         "observation_id": str(observation.observation_id),
         "status": "stored",
-        "server_timestamp": server_received_at.isoformat()
+        "server_timestamp": datetime.utcnow().isoformat()
     }
+
+
+@router.post("/ema-response")
+async def record_ema_response(
+    ema_id: UUID,
+    response_value: dict,
+    user_id: UUID = Depends(verify_device_token)
+):
+    """Record user response to EMA."""
+    store = await get_behavioral_store()
+    if not store:
+        raise HTTPException(status_code=503, detail="Data store unavailable")
+    
+    observation = BehavioralObservation(
+        user_id=user_id,
+        observation_type=ObservationType.EMA_RESPONSE,
+        privacy_level=PrivacyLevel.ANONYMOUS,
+        behavior={
+            'ema_id': str(ema_id),
+            'response': response_value
+        }
+    )
+    
+    await store.store_observation(observation)
+    return {"status": "recorded"}
 
 
 @router.get("/privacy-budget")
 async def check_privacy_budget(user_id: UUID = Depends(verify_device_token)):
-    """
-    Check remaining privacy budget for edge device.
-    """
-    # Simple implementation - count today's observations
+    """Check remaining privacy budget for edge device."""
     store = await get_behavioral_store()
     if not store:
         return {"privacy_budget_remaining": 1.0, "observations_today": 0}
-        
+    
     today_start = datetime.utcnow().replace(hour=0, minute=0, second=0)
     
     try:
