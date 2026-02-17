@@ -2,6 +2,7 @@
 Proactive Agent Loop: Spirit's autonomous operation system.
 Predicts, schedules, and executes interventions without waiting for user input.
 The goal: intervene before the user fails, not after.
+v1.4: Integrated Multi-Agent Debate (MAO) and Ethical Guardrails
 """
 
 import asyncio
@@ -16,6 +17,9 @@ from spirit.services.notification_engine import NotificationEngine, Notification
 from spirit.agents.behavioral_scientist import BehavioralScientistAgent, PredictiveEngine
 from spirit.memory.episodic_memory import EpisodicMemorySystem
 from spirit.services.causal_inference import CausalInferenceEngine
+# NEW: Import MAO and Ethical Guardrails
+from spirit.agents.multi_agent_debate import MultiAgentDebate
+from spirit.services.ethical_guardrails import EthicalGuardrails
 
 
 class PredictionHorizon(Enum):
@@ -53,6 +57,7 @@ class ProactiveScheduler:
     """
     Schedules autonomous check-ins and interventions.
     Operates on predicted vulnerability windows, not fixed times.
+    v1.4: All interventions routed through MAO debate and ethical checks.
     """
     
     def __init__(self, user_id: int):
@@ -63,6 +68,10 @@ class ProactiveScheduler:
         
         # Callbacks for different prediction types
         self.intervention_handlers: Dict[str, Callable] = {}
+        
+        # NEW: Initialize MAO and Ethical Guardrails
+        self.debate_system = MultiAgentDebate()
+        self.ethical_guardrails = EthicalGuardrails()
     
     def register_handler(self, state_type: str, handler: Callable):
         """Register a function to handle predicted states."""
@@ -303,26 +312,104 @@ class ProactiveScheduler:
     async def _execute_intervention(self, prediction: PredictedState):
         """
         Execute the optimal intervention for a predicted state.
+        v1.4: Now routes through Ethical Guardrails → MAO Debate → Delivery
         """
+        # NEW STEP 1: Ethical Guardrails Check
+        ethical_check = await self.ethical_guardrails.approve_intervention(
+            user_id=self.user_id,
+            intervention_type=prediction.state_type,
+            intensity=prediction.confidence
+        )
+        
+        if not ethical_check['approved']:
+            print(f"Intervention blocked by ethical guardrails: {ethical_check['reason']}")
+            await self._log_blocked_intervention(prediction, ethical_check['reason'])
+            return
+        
+        # NEW STEP 2: Multi-Agent Debate
+        # Build user context for debate
+        user_context = await self._build_debate_context(prediction)
+        
+        debate_result = await self.debate_system.debate_intervention(
+            user_context=user_context,
+            proposed_intervention=prediction.optimal_intervention or "default_intervention",
+            predicted_outcome={
+                'expected_improvement': prediction.expected_outcome_if_intervene,
+                'confidence': prediction.confidence
+            }
+        )
+        
+        if not debate_result['proceed']:
+            print(f"Intervention blocked by adversary: {debate_result.get('adversary_concerns', 'unknown objection')}")
+            await self._log_adversary_objection(prediction, debate_result)
+            return
+        
+        # STEP 3: Execute debated intervention
         handler = self.intervention_handlers.get(prediction.state_type)
         
         if handler:
-            await handler(prediction, self.user_id)
+            # Pass debate result to handler so it can use the refined message
+            await handler(prediction, self.user_id, debate_result)
         else:
-            # Default: send notification
-            await self._default_intervention(prediction)
+            # Default: send notification with debated message
+            await self._default_intervention(prediction, debate_result)
     
-    async def _default_intervention(self, prediction: PredictedState):
-        """Default intervention: smart notification."""
+    async def _build_debate_context(self, prediction: PredictedState) -> Dict:
+        """Build context for MAO debate."""
+        # Get rejection rate for this user
+        store = await get_behavioral_store()
+        rejection_rate = 0.0
+        interventions_today = 0
+        
+        if store:
+            # Query recent interventions
+            today_start = datetime.utcnow().replace(hour=0, minute=0, second=0).isoformat()
+            recent = store.client.table('proactive_interventions').select('*').eq(
+                'user_id', str(self.user_id)
+            ).gte('executed_at', today_start).execute()
+            
+            if recent.data:
+                interventions_today = len(recent.data)
+                # Calculate rejection rate from last 20 interventions
+                last_20 = store.client.table('proactive_interventions').select('*').eq(
+                    'user_id', str(self.user_id)
+                ).order('executed_at', desc=True).limit(20).execute()
+                
+                if last_20.data:
+                    rejected = sum(1 for i in last_20.data if i.get('user_response') == 'dismissed')
+                    rejection_rate = rejected / len(last_20.data)
+        
+        return {
+            'current_state': prediction.state_type,
+            'recent_pattern': prediction.historical_pattern_match,
+            'goal_progress': 0.5,  # Would fetch from goals
+            'rejection_rate': rejection_rate,
+            'interventions_today': interventions_today,
+            'predicted_vulnerability': prediction.state_type == 'vulnerability',
+            'confidence': prediction.confidence
+        }
+    
+    async def _default_intervention(self, prediction: PredictedState, debate_result: Optional[Dict] = None):
+        """Default intervention: smart notification with debated message."""
         engine = NotificationEngine(self.user_id)
         
+        # Use debated message if available, otherwise generate default
+        if debate_result and debate_result.get('message'):
+            title = "Spirit"
+            body = debate_result['message']
+        else:
+            title = self._get_intervention_title(prediction)
+            body = self._get_intervention_body(prediction)
+        
         content = {
-            "title": self._get_intervention_title(prediction),
-            "body": self._get_intervention_body(prediction),
+            "title": title,
+            "body": body,
             "data": {
                 "prediction_type": prediction.state_type,
                 "confidence": prediction.confidence,
-                "expected_outcome": prediction.expected_outcome_if_intervene
+                "expected_outcome": prediction.expected_outcome_if_intervene,
+                "debate_validated": debate_result is not None,
+                "debate_rounds": debate_result.get('debate_rounds', 0) if debate_result else 0
             }
         }
         
@@ -337,7 +424,7 @@ class ProactiveScheduler:
         )
         
         # Log the proactive intervention
-        await self._log_proactive_intervention(prediction)
+        await self._log_proactive_intervention(prediction, debate_result)
     
     def _get_intervention_title(self, prediction: PredictedState) -> str:
         """Generate contextual title based on prediction."""
@@ -368,7 +455,7 @@ class ProactiveScheduler:
             await self._execute_intervention(prediction)
             del self.scheduled_checks[check_id]
     
-    async def _log_proactive_intervention(self, prediction: PredictedState):
+    async def _log_proactive_intervention(self, prediction: PredictedState, debate_result: Optional[Dict] = None):
         """Log for learning and causal analysis."""
         store = await get_behavioral_store()
         if store:
@@ -380,7 +467,34 @@ class ProactiveScheduler:
                 'confidence': prediction.confidence,
                 'intervention_type': prediction.optimal_intervention,
                 'executed_at': datetime.utcnow().isoformat(),
-                'expected_outcome': prediction.expected_outcome_if_intervene
+                'expected_outcome': prediction.expected_outcome_if_intervene,
+                'debate_validated': debate_result is not None,
+                'debate_rounds': debate_result.get('debate_rounds', 0) if debate_result else 0,
+                'consensus_reached': debate_result.get('consensus_reached', False) if debate_result else False
+            }).execute()
+    
+    async def _log_blocked_intervention(self, prediction: PredictedState, reason: str):
+        """Log when ethical guardrails block an intervention."""
+        store = await get_behavioral_store()
+        if store:
+            store.client.table('blocked_interventions').insert({
+                'user_id': str(self.user_id),
+                'predicted_state': prediction.state_type,
+                'blocked_reason': reason,
+                'blocked_at': datetime.utcnow().isoformat(),
+                'confidence': prediction.confidence
+            }).execute()
+    
+    async def _log_adversary_objection(self, prediction: PredictedState, debate_result: Dict):
+        """Log adversary objections for learning."""
+        store = await get_behavioral_store()
+        if store:
+            store.client.table('adversary_objections').insert({
+                'user_id': str(self.user_id),
+                'predicted_state': prediction.state_type,
+                'objection': debate_result.get('adversary_concerns', 'unknown'),
+                'debate_rounds': debate_result.get('debate_rounds', 0),
+                'logged_at': datetime.utcnow().isoformat()
             }).execute()
 
 
@@ -542,44 +656,68 @@ class GlobalProactiveOrchestrator:
         if user_id in self.experiment_runners:
             del self.experiment_runners[user_id]
     
-    async def _handle_vulnerability(self, prediction: PredictedState, user_id: int):
-        """Handle predicted vulnerability."""
-        # Send immediate micro-intervention
+    async def _handle_vulnerability(self, prediction: PredictedState, user_id: int, debate_result: Optional[Dict] = None):
+        """Handle predicted vulnerability with debated message."""
         engine = NotificationEngine(user_id)
+        
+        # Use debated message if available
+        body = debate_result['message'] if debate_result else "Your attention seems scattered. 30-second reset?"
         
         await engine.send_notification(
             content={
                 "title": "Focus check",
-                "body": "Your attention seems scattered. 30-second reset?",
-                "action": "focus_reset"
+                "body": body,
+                "action": "focus_reset",
+                "data": {
+                    "debate_validated": debate_result is not None,
+                    "debate_rounds": debate_result.get('debate_rounds', 0) if debate_result else 0
+                }
             },
             priority=NotificationPriority.HIGH,
             notification_type="proactive_vulnerability"
         )
     
-    async def _handle_opportunity(self, prediction: PredictedState, user_id: int):
-        """Handle predicted opportunity."""
+    async def _handle_opportunity(self, prediction: PredictedState, user_id: int, debate_result: Optional[Dict] = None):
+        """Handle predicted opportunity with debated message."""
         engine = NotificationEngine(user_id)
+        
+        # Use debated message if available, otherwise calculate gain
+        if debate_result and debate_result.get('message'):
+            body = debate_result['message']
+        else:
+            gain = int(prediction.expected_outcome_if_intervene * 100)
+            body = f"You're in flow. Extend this session? Predicted productivity gain: +{gain}%"
         
         await engine.send_notification(
             content={
                 "title": "You're in flow",
-                "body": f"Extend this session? Predicted productivity gain: +{int(prediction.expected_outcome_if_intervene * 100)}%",
-                "action": "extend_focus"
+                "body": body,
+                "action": "extend_focus",
+                "data": {
+                    "debate_validated": debate_result is not None,
+                    "debate_rounds": debate_result.get('debate_rounds', 0) if debate_result else 0
+                }
             },
             priority=NotificationPriority.NORMAL,
             notification_type="proactive_opportunity"
         )
     
-    async def _handle_risk(self, prediction: PredictedState, user_id: int):
-        """Handle predicted risk."""
+    async def _handle_risk(self, prediction: PredictedState, user_id: int, debate_result: Optional[Dict] = None):
+        """Handle predicted risk with debated message."""
         engine = NotificationEngine(user_id)
+        
+        # Use debated message if available
+        body = debate_result['message'] if debate_result else "Your energy typically drops now. Pre-positioned: 5-min walk suggestion ready."
         
         await engine.send_notification(
             content={
                 "title": "Heads up",
-                "body": "Your energy typically drops now. Pre-positioned: 5-min walk suggestion ready.",
-                "action": "preventive_break"
+                "body": body,
+                "action": "preventive_break",
+                "data": {
+                    "debate_validated": debate_result is not None,
+                    "debate_rounds": debate_result.get('debate_rounds', 0) if debate_result else 0
+                }
             },
             priority=NotificationPriority.NORMAL,
             notification_type="proactive_risk"
