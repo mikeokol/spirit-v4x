@@ -1,6 +1,7 @@
 """
 Spirit's core intelligence: A LangGraph agent that acts as a behavioral scientist.
 It reasons about data, forms hypotheses, predicts outcomes, and decides interventions.
+v1.4: Integrated with Multi-Agent Debate (MAO) - now recommends, doesn't decide.
 """
 
 from datetime import datetime, timedelta
@@ -18,6 +19,8 @@ from spirit.config import settings
 from spirit.db.supabase_client import get_behavioral_store
 from spirit.services.causal_inference import CausalInferenceEngine
 from spirit.services.goal_integration import BehavioralGoalBridge
+# NEW: Import Belief Network for cognitive dissonance detection
+from spirit.agents.belief_network import BeliefNetwork, CognitiveDissonanceDetector
 
 
 class ScientistState(TypedDict):
@@ -30,15 +33,19 @@ class ScientistState(TypedDict):
     recent_observations: Annotated[List[Dict], operator.add]  # Accumulated
     hypothesis: Optional[str]  # Current working hypothesis
     confidence: float  # 0-1 confidence in hypothesis
-    recommended_action: Optional[str]  # Intervention decision
+    recommended_action: Optional[str]  # Intervention recommendation (not final decision)
     reasoning: List[str]  # Chain of thought
+    belief_alignment: Optional[Dict]  # NEW: How this aligns with user's beliefs
+    dissonance_detected: bool  # NEW: Flag if user beliefs contradict data
     next_step: str  # Graph routing
 
 
 class BehavioralScientistAgent:
     """
     LangGraph agent that continuously analyzes behavioral data
-    and makes scientific decisions about interventions.
+    and makes scientific recommendations about interventions.
+    v1.4: Now integrates with Belief Network to detect cognitive dissonance.
+    Recommendations go to MAO for debate before execution.
     """
     
     def __init__(self, user_id: UUID):
@@ -49,6 +56,9 @@ class BehavioralScientistAgent:
             temperature=0.2  # Scientific precision
         )
         self.graph = self._build_graph()
+        # NEW: Initialize Belief Network
+        self.belief_network = BeliefNetwork(user_id)
+        self.dissonance_detector = CognitiveDissonanceDetector(user_id)
         
     def _build_graph(self) -> StateGraph:
         """Build the LangGraph reasoning pipeline."""
@@ -77,20 +87,53 @@ class BehavioralScientistAgent:
             # Query recent pattern
             recent = state["recent_observations"][-10:]
             
+            # NEW: Check for cognitive dissonance before forming hypothesis
+            dissonance = self.dissonance_detector.check_dissonance(
+                observation=state["current_observation"],
+                recent_observations=recent
+            )
+            
+            if dissonance['detected']:
+                state["dissonance_detected"] = True
+                state["belief_alignment"] = {
+                    "user_belief": dissonance['user_belief'],
+                    "data_reality": dissonance['data_reality'],
+                    "gap": dissonance['gap']
+                }
+                state["reasoning"].append(
+                    f"COGNITIVE DISSONANCE: User believes '{dissonance['user_belief']}' "
+                    f"but data shows '{dissonance['data_reality']}'"
+                )
+                # Form hypothesis about the belief gap itself
+                hypothesis_prompt = f"""
+                User believes: {dissonance['user_belief']}
+                Reality shows: {dissonance['data_reality']}
+                Gap magnitude: {dissonance['gap']}
+                
+                Form hypothesis about why this belief-reality gap exists
+                and how to address it without causing rebound.
+                """
+            else:
+                state["dissonance_detected"] = False
+                hypothesis_prompt = f"""
+                Recent observations: {recent}
+                Current context: {state['current_observation']}
+                
+                Form a hypothesis about what is causing this behavior pattern
+                and what it might lead to. Be specific.
+                """
+            
             # Use LLM to generate hypothesis
             messages = [
                 SystemMessage(content="""
                 You are a behavioral scientist analyzing digital phenotyping data.
                 Form concise causal hypotheses. Use format: "X leads to Y because Z".
                 Be specific about mechanisms. Confidence must be justified.
-                """),
-                HumanMessage(content=f"""
-                Recent observations: {recent}
-                Current context: {state['current_observation']}
                 
-                Form a hypothesis about what is causing this behavior pattern
-                and what it might lead to. Be specific.
-                """)
+                If cognitive dissonance is detected, hypothesize about the belief
+                formation mechanism and how to gently correct it.
+                """),
+                HumanMessage(content=hypothesis_prompt)
             ]
             
             response = self.llm.invoke(messages)
@@ -106,18 +149,37 @@ class BehavioralScientistAgent:
             """Predict future trajectory if no intervention."""
             hypothesis = state["hypothesis"]
             
-            messages = [
-                SystemMessage(content="""
-                Based on the hypothesis, predict what happens in 24 hours 
-                if no intervention occurs. Be specific about outcomes.
-                """),
-                HumanMessage(content=f"""
-                Hypothesis: {hypothesis}
-                Current trajectory: {state['recent_observations'][-3:]}
-                
-                Predict specific outcomes 24 hours from now.
-                """)
-            ]
+            # NEW: If dissonance detected, predict belief change vs behavior change
+            if state.get("dissonance_detected"):
+                messages = [
+                    SystemMessage(content="""
+                    Based on the belief-reality gap, predict two scenarios:
+                    1. If we challenge the belief directly (risk of rebound/annoyance)
+                    2. If we work within the belief frame (slower but safer)
+                    
+                    Estimate probability of success for each approach.
+                    """),
+                    HumanMessage(content=f"""
+                    Belief: {state['belief_alignment']['user_belief']}
+                    Reality: {state['belief_alignment']['data_reality']}
+                    Hypothesis: {hypothesis}
+                    
+                    Predict outcomes for both intervention strategies.
+                    """)
+                ]
+            else:
+                messages = [
+                    SystemMessage(content="""
+                    Based on the hypothesis, predict what happens in 24 hours 
+                    if no intervention occurs. Be specific about outcomes.
+                    """),
+                    HumanMessage(content=f"""
+                    Hypothesis: {hypothesis}
+                    Current trajectory: {state['recent_observations'][-3:]}
+                    
+                    Predict specific outcomes 24 hours from now.
+                    """)
+                ]
             
             response = self.llm.invoke(messages)
             state["reasoning"].append(f"Prediction: {response.content}")
@@ -129,28 +191,45 @@ class BehavioralScientistAgent:
             """Decide whether and how to intervene."""
             confidence = state["confidence"]
             
-            if confidence < 0.6:
+            # NEW: Lower threshold if dissonance detected (more urgent)
+            threshold = 0.5 if state.get("dissonance_detected") else 0.6
+            
+            if confidence < threshold:
                 state["recommended_action"] = "observe_more"
-                state["reasoning"].append("Confidence too low - continue observation")
+                state["reasoning"].append(f"Confidence {confidence:.2f} below threshold {threshold} - continue observation")
             else:
                 # Determine intervention type
                 action = self._select_intervention(state)
                 state["recommended_action"] = action
-                state["reasoning"].append(f"Intervention selected: {action}")
+                state["reasoning"].append(f"Intervention recommended: {action}")
+                
+                # NEW: If dissonance detected, tag for belief-challenge intervention
+                if state.get("dissonance_detected"):
+                    state["reasoning"].append("Tagged as BELIEF_CHALLENGE - requires careful framing")
+                    state["recommended_action"] = f"belief_challenge:{action}"
             
             state["next_step"] = "execute"
             return state
         
         def execute(state: ScientistState) -> ScientistState:
-            """Execute or queue the intervention."""
+            """Package recommendation for MAO debate (not direct execution)."""
             action = state["recommended_action"]
             
             if action == "observe_more":
-                state["reasoning"].append("No action taken - insufficient certainty")
+                state["reasoning"].append("No action recommended - insufficient certainty")
             else:
-                # Log the decision for causal analysis later
-                self._log_intervention_decision(state)
-                state["reasoning"].append(f"Intervention {action} queued for delivery")
+                # NEW: Update belief network with this recommendation
+                if state.get("dissonance_detected"):
+                    self.belief_network.tag_hypothesis(
+                        belief=state["belief_alignment"]["user_belief"],
+                        hypothesis=state["hypothesis"],
+                        intervention_planned=action
+                    )
+                
+                # Log the recommendation for the proactive loop to pick up
+                # The proactive loop will run this through MAO debate
+                self._queue_for_debate(state)
+                state["reasoning"].append(f"Recommendation {action} queued for MAO debate")
             
             state["next_step"] = END
             return state
@@ -186,6 +265,8 @@ class BehavioralScientistAgent:
             confidence=0.0,
             recommended_action=None,
             reasoning=[],
+            belief_alignment=None,
+            dissonance_detected=False,
             next_step="observe"
         )
         
@@ -197,7 +278,10 @@ class BehavioralScientistAgent:
             "confidence": result["confidence"],
             "recommended_action": result["recommended_action"],
             "reasoning": result["reasoning"],
-            "intervention_queued": result["recommended_action"] not in [None, "observe_more"]
+            "dissonance_detected": result["dissonance_detected"],
+            "belief_alignment": result["belief_alignment"],
+            "intervention_queued": result["recommended_action"] not in [None, "observe_more"],
+            "requires_mao_debate": result["recommended_action"] not in [None, "observe_more"]
         }
     
     def _is_anomalous(self, observation: Dict) -> bool:
@@ -230,6 +314,13 @@ class BehavioralScientistAgent:
         """Select appropriate intervention based on hypothesis."""
         hypothesis = state["hypothesis"].lower()
         
+        # NEW: If dissonance detected, use gentler interventions
+        if state.get("dissonance_detected"):
+            if "distract" in hypothesis or "scatter" in hypothesis:
+                return "gentle_focus_awareness"  # Don't challenge directly
+            elif "fatigue" in hypothesis:
+                return "self_compassion_prompt"  # Acknowledge their belief
+        
         if "distract" in hypothesis or "scatter" in hypothesis:
             return "focus_mode_prompt"
         elif "fatigue" in hypothesis or "tired" in hypothesis:
@@ -241,11 +332,24 @@ class BehavioralScientistAgent:
         
         return "general_check_in"
     
-    def _log_intervention_decision(self, state: ScientistState):
-        """Log decision for later causal analysis."""
-        # Store in Supabase for tracking outcomes
-        # This enables "did the intervention work?" analysis
-        pass
+    def _queue_for_debate(self, state: ScientistState):
+        """Queue recommendation for MAO debate in proactive loop."""
+        # Store in Supabase for proactive loop to pick up
+        # This decouples the scientist from the delivery system
+        store = get_behavioral_store()
+        if store:
+            store.client.table('intervention_recommendations').insert({
+                'recommendation_id': str(uuid4()),
+                'user_id': str(self.user_id),
+                'hypothesis': state["hypothesis"],
+                'confidence': state["confidence"],
+                'recommended_action': state["recommended_action"],
+                'dissonance_detected': state.get("dissonance_detected", False),
+                'belief_alignment': state.get("belief_alignment"),
+                'reasoning': state["reasoning"],
+                'created_at': datetime.utcnow().isoformat(),
+                'status': 'pending_debate'
+            }).execute()
 
 
 class PredictiveEngine:
@@ -261,6 +365,8 @@ class PredictiveEngine:
             api_key=settings.openai_api_key,
             temperature=0.3
         )
+        # NEW: Initialize belief network for belief-aware predictions
+        self.belief_network = BeliefNetwork(user_id)
     
     async def predict_goal_outcome(
         self,
@@ -269,6 +375,7 @@ class PredictiveEngine:
     ) -> Dict[str, Any]:
         """
         Predict probability of goal achievement based on current trajectory.
+        v1.4: Now factors in user's beliefs about their capabilities.
         """
         # Get behavioral history
         store = await get_behavioral_store()
@@ -286,15 +393,34 @@ class PredictiveEngine:
         bridge = BehavioralGoalBridge(self.user_id)
         progress = await bridge.compute_goal_progress(goal_id)
         
+        # NEW: Get user's beliefs about this goal
+        belief_model = await self.belief_network.get_beliefs_about_goal(goal_id)
+        
         # Statistical prediction
         trend = self._calculate_trend(observations)
         
-        # LLM reasoning about trajectory
+        # LLM reasoning about trajectory - now includes beliefs
+        belief_context = ""
+        if belief_model:
+            belief_context = f"""
+            User's stated beliefs about this goal:
+            - Believes they work best at: {belief_model.get('optimal_time', 'unknown')}
+            - Self-efficacy score: {belief_model.get('self_efficacy', 0.5)}
+            - Identified barriers: {belief_model.get('barriers', [])}
+            
+            Note: Adjust prediction if data contradicts beliefs significantly.
+            """
+        
         messages = [
             SystemMessage(content="""
             You are a predictive model analyzing behavioral trajectories.
             Estimate probability of goal achievement and identify key risk factors.
             Be specific and quantitative where possible.
+            
+            IMPORTANT: Consider the user's beliefs about themselves. If their beliefs
+            are misaligned with reality, this creates either:
+            1. Overconfidence (believes they can do more than data shows) -> higher risk
+            2. Underconfidence (believes they can do less than data shows) -> hidden potential
             """),
             HumanMessage(content=f"""
             Goal: {progress.get('goal_id')}
@@ -302,10 +428,13 @@ class PredictiveEngine:
             7-day behavioral trend: {trend}
             Recent metrics: {progress.get('metrics')}
             
+            {belief_context}
+            
             Predict:
             1. Probability of goal achievement in {horizon_days} days (0-100%)
             2. Key risk factors that could derail progress
             3. Critical intervention points
+            4. Belief-reality gaps that need addressing
             """)
         ]
         
@@ -317,6 +446,7 @@ class PredictiveEngine:
             "trajectory_analysis": response.content,
             "statistical_trend": trend,
             "current_progress": progress.get("progress_score"),
+            "belief_alignment": belief_model,
             "confidence": "medium" if len(observations) > 50 else "low"
         }
     
@@ -353,10 +483,13 @@ class InterventionOptimizer:
     """
     Optimizes intervention timing and content using multi-armed bandits
     and causal learning.
+    v1.4: Now includes belief-aware optimization.
     """
     
     def __init__(self, user_id: UUID):
         self.user_id = user_id
+        # NEW: Initialize belief network
+        self.belief_network = BeliefNetwork(user_id)
         
     async def optimize_intervention(
         self,
@@ -366,12 +499,30 @@ class InterventionOptimizer:
         """
         Select best intervention using Thompson sampling approach.
         Balances exploration (try new things) vs exploitation (use what works).
+        v1.4: Now filters interventions based on user's belief state.
         """
         store = await get_behavioral_store()
         
-        # Get historical effectiveness of each intervention
+        # NEW: Check if user is in a belief-challenged state
+        current_beliefs = await self.belief_network.get_current_beliefs()
+        
+        # Filter interventions that would cause cognitive dissonance
+        safe_interventions = self._filter_by_belief_compatibility(
+            available_interventions, 
+            current_beliefs
+        )
+        
+        # If no safe interventions, default to observation
+        if not safe_interventions:
+            return {
+                "selected_intervention": "observe_more",
+                "selection_method": "belief_safety_filter",
+                "reason": "All interventions conflict with current user beliefs - would cause rebound"
+            }
+        
+        # Get historical effectiveness of each safe intervention
         effectiveness = {}
-        for intervention in available_interventions:
+        for intervention in safe_interventions:
             # Query past outcomes
             past = await self._get_intervention_history(intervention)
             
@@ -409,11 +560,34 @@ class InterventionOptimizer:
         
         return {
             "selected_intervention": best_intervention,
-            "selection_method": "thompson_sampling",
+            "selection_method": "thompson_sampling_with_belief_filter",
             "estimated_success_probability": best_sample,
             "exploration_vs_exploitation": "exploration" if effectiveness[best_intervention]["n_trials"] < 10 else "exploitation",
-            "alternatives_considered": list(effectiveness.keys())
+            "alternatives_considered": list(effectiveness.keys()),
+            "filtered_out": list(set(available_interventions) - set(safe_interventions)),
+            "belief_compatibility_checked": True
         }
+    
+    def _filter_by_belief_compatibility(
+        self, 
+        interventions: List[str], 
+        beliefs: Dict
+    ) -> List[str]:
+        """Filter interventions that would clash with user beliefs."""
+        safe = []
+        
+        for intervention in interventions:
+            # Check compatibility
+            if "focus" in intervention and beliefs.get("believes_multitasking_is_better"):
+                # User believes multitasking works - direct focus challenge might rebound
+                continue
+            if "rest" in intervention and beliefs.get("believes_push_through_fatigue"):
+                # User believes in pushing through - rest suggestion might be rejected
+                continue
+            
+            safe.append(intervention)
+        
+        return safe
     
     async def _get_intervention_history(self, intervention_type: str) -> List[Dict]:
         """Get past outcomes for this intervention type."""
