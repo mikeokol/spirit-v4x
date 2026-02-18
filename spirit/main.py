@@ -3,7 +3,7 @@ Spirit Behavioral Research Agent - Main Application
 Continuity ledger + Behavioral research + Causal inference + Goal integration 
 + Intelligence + Memory + Proactive Agent Loop + Real-time Processing 
 + Advanced Causal Discovery + Multi-Agent Debate + Belief Network 
-+ Ethical Guardrails + Memory Consolidation
++ Ethical Guardrails + Memory Consolidation + Human-Centered Systems
 """
 
 import asyncio
@@ -25,8 +25,11 @@ from spirit.api.memory import router as memory_router
 from spirit.api.delivery import router as delivery_router
 from spirit.api.proactive import router as proactive_router
 from spirit.api.realtime_causal import router as realtime_causal_router
-from spirit.api.belief import router as belief_router  # NEW
-from spirit.api.ethical import router as ethical_router  # NEW
+from spirit.api.belief import router as belief_router
+from spirit.api.ethical import router as ethical_router
+# NEW: Human-centered system routers
+from spirit.api.onboarding import router as onboarding_router
+from spirit.api.empathy import router as empathy_router
 from spirit.agents.proactive_loop import get_orchestrator
 from spirit.streaming.realtime_pipeline import get_stream_processor
 
@@ -185,6 +188,7 @@ async def lifespan(app: FastAPI):
     print("=" * 60)
     print("SPIRIT v1.4.0 ONLINE")
     print("Features: MAO | Belief Network | Ethical Guardrails | Memory Consolidation")
+    print("NEW: Rich Onboarding | Empathy Calibration | Agency Preservation")
     print("=" * 60)
     
     yield
@@ -220,9 +224,10 @@ app = FastAPI(
     Continuity ledger + Behavioral research engine + Causal inference + 
     Goal integration + Intelligence + Memory + Proactive Agent Loop + 
     Real-time Processing + Advanced Causal Discovery + Multi-Agent Debate +
-    Belief Network + Ethical Guardrails + Memory Consolidation
+    Belief Network + Ethical Guardrails + Memory Consolidation +
+    Rich Onboarding + Empathy Calibration + Agency Preservation
     """,
-    version="1.4.0",  # MAO + Belief Network + Ethical Guardrails + Memory Consolidation
+    version="1.4.0",  # Added human-centered systems
     lifespan=lifespan,
 )
 
@@ -250,11 +255,14 @@ def read_root():
         "proactive_loop": bool(settings.supabase_url),
         "realtime_processing": bool(settings.supabase_url),
         "advanced_causal_discovery": bool(settings.openai_api_key) and bool(settings.supabase_url),
-        # NEW components
         "multi_agent_debate": bool(settings.openai_api_key) and bool(settings.supabase_url),
         "belief_network": bool(settings.supabase_url),
         "ethical_guardrails": bool(settings.supabase_url),
-        "memory_consolidation": bool(settings.supabase_url)
+        "memory_consolidation": bool(settings.supabase_url),
+        # NEW: Human-centered systems
+        "rich_onboarding": bool(settings.supabase_url),
+        "empathy_calibration": bool(settings.supabase_url),
+        "agency_preservation": bool(settings.supabase_url)
     }
     
     # Calculate system health
@@ -267,7 +275,12 @@ def read_root():
         "version": "1.4.0",
         "system_health": f"{enabled}/{total} components enabled",
         "features": components,
-        "status": "healthy" if enabled >= total * 0.7 else "degraded"
+        "status": "healthy" if enabled >= total * 0.7 else "degraded",
+        "human_centered_systems": {
+            "onboarding": "/v1/onboarding",
+            "empathy_profile": "/v1/empathy/profile",
+            "partnership_contract": "/v1/empathy/partnership-contract"
+        }
     }
 
 @app.get("/health")
@@ -304,7 +317,11 @@ async def system_metrics():
         "pending_mao_debates": 0,
         "blocked_interventions_24h": 0,
         "consolidated_memories": 0,
-        "active_proactive_loops": len(get_orchestrator().user_loops)
+        "active_proactive_loops": len(get_orchestrator().user_loops),
+        # NEW: Human-centered metrics
+        "active_onboarding_sessions": 0,
+        "completed_onboardings": 0,
+        "empathy_feedback_received_24h": 0
     }
     
     if store and store.client:
@@ -327,6 +344,22 @@ async def system_metrics():
                 '*', count='exact'
             ).eq('consolidated', True).execute()
             metrics["consolidated_memories"] = consolidated.count if hasattr(consolidated, 'count') else 0
+            
+            # NEW: Onboarding metrics
+            active_onboarding = store.client.table('onboarding_sessions').select(
+                '*', count='exact'
+            ).is_('completed_at', None).execute()
+            metrics["active_onboarding_sessions"] = active_onboarding.count if hasattr(active_onboarding, 'count') else 0
+            
+            completed_onboarding = store.client.table('belief_networks').select(
+                '*', count='exact'
+            ).not_.is_('onboarded_at', None).execute()
+            metrics["completed_onboardings"] = completed_onboarding.count if hasattr(completed_onboarding, 'count') else 0
+            
+            empathy_feedback = store.client.table('empathy_feedback').select(
+                '*', count='exact'
+            ).gte('recorded_at', day_ago).execute()
+            metrics["empathy_feedback_received_24h"] = empathy_feedback.count if hasattr(empathy_feedback, 'count') else 0
             
         except Exception as e:
             metrics["error"] = str(e)
@@ -371,3 +404,7 @@ app.include_router(belief_router, prefix="/api/belief", tags=["belief"])
 
 # NEW: Ethical Guardrails API
 app.include_router(ethical_router, prefix="/api/ethical", tags=["ethical"])
+
+# NEW: Human-centered system APIs
+app.include_router(onboarding_router, prefix="/v1/onboarding", tags=["onboarding"])
+app.include_router(empathy_router, prefix="/v1/empathy", tags=["empathy"])
