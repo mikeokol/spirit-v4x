@@ -1,0 +1,490 @@
+"""
+API endpoints for Spirit's empathy calibration and agency preservation system.
+Allows users to view their emotional profile, provide feedback, and manage partnership terms.
+"""
+
+from datetime import datetime
+from typing import Dict, List, Optional, Any
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.security import HTTPBearer
+
+from spirit.services.empathy_agency import (
+    EmpathyCalibrationEngine,
+    EmpathyProfile,
+    PartnershipContract,
+    AgencyPreservationMonitor
+)
+from spirit.db.supabase_client import get_behavioral_store
+from spirit.api.auth import get_current_user
+from spirit.models import User
+
+
+router = APIRouter(prefix="/v1/empathy", tags=["empathy"])
+security = HTTPBearer()
+
+
+@router.get("/profile")
+async def get_empathy_profile(
+    include_history: bool = False,
+    user: User = Depends(get_current_user)
+):
+    """
+    Get your current empathy calibration profile.
+    
+    Shows how Spirit has learned to communicate with you specifically—
+    what approaches work, what to avoid, and how much support vs challenge you prefer.
+    """
+    user_id = str(user.id)
+    
+    engine = EmpathyCalibrationEngine(user_id)
+    await engine.load_profile()
+    
+    profile = engine.profile
+    
+    response = {
+        "your_communication_profile": {
+            "validation_need": {
+                "score": profile.validation_need,
+                "meaning": "How much affirmation you need before challenges",
+                "interpretation": _interpret_validation_need(profile.validation_need)
+            },
+            "challenge_tolerance": {
+                "score": profile.challenge_tolerance,
+                "meaning": "How much direct feedback you can handle",
+                "interpretation": _interpret_challenge_tolerance(profile.challenge_tolerance)
+            },
+            "preferred_tone": {
+                "style": profile.preferred_tone,
+                "meaning": "How Spirit communicates with you"
+            }
+        },
+        "sensitive_topics": {
+            "count": len(profile.trigger_sensitivity),
+            "topics": list(profile.trigger_sensitivity.keys()) if profile.trigger_sensitivity else [],
+            "note": "Spirit approaches these with extra care"
+        },
+        "learning_progress": {
+            "successful_approaches": len(profile.successful_approaches),
+            "failed_approaches": len(profile.failed_approaches),
+            "last_updated": profile.last_updated.isoformat() if profile.last_updated else None,
+            "message": "Spirit learns from every interaction"
+        },
+        "transparency_note": "This profile exists to serve you better. You can reset it anytime."
+    }
+    
+    if include_history:
+        response["approach_history"] = {
+            "what_works": profile.successful_approaches[-5:] if profile.successful_approaches else [],
+            "what_doesnt": profile.failed_approaches[-5:] if profile.failed_approaches else []
+        }
+    
+    return response
+
+
+@router.post("/feedback")
+async def provide_empathy_feedback(
+    interaction_context: str,  # What was Spirit helping with
+    how_it_felt: str,  # "supportive", "patronizing", "helpful", "annoying", "just_right", "dismissive"
+    specific_feedback: Optional[str] = None,
+    suggested_approach: Optional[str] = None,  # What would have worked better
+    user: User = Depends(get_current_user)
+):
+    """
+    Direct feedback on how Spirit's communication felt.
+    
+    This is critical—Spirit learns your specific preferences from this feedback.
+    Be honest: "patronizing" helps more than "fine" if that's how it felt.
+    """
+    user_id = str(user.id)
+    
+    # Validate input
+    valid_feelings = ["supportive", "patronizing", "helpful", "annoying", "just_right", "dismissive", "too_intense", "too_gentle"]
+    if how_it_felt not in valid_feelings:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid feeling. Choose from: {', '.join(valid_feelings)}"
+        )
+    
+    # Map to internal outcome
+    outcome_map = {
+        "supportive": "positive",
+        "helpful": "positive",
+        "just_right": "positive",
+        "patronizing": "negative",
+        "dismissive": "negative",
+        "too_intense": "negative",
+        "annoying": "rejected",
+        "too_gentle": "rejected"
+    }
+    
+    # Update empathy profile
+    engine = EmpathyCalibrationEngine(user_id)
+    await engine.load_profile()
+    
+    await engine.update_from_interaction(
+        interaction_outcome=outcome_map[how_it_felt],
+        user_feedback=f"{how_it_felt}: {specific_feedback}" if specific_feedback else how_it_felt,
+        intervention_used=interaction_context
+    )
+    
+    # Store detailed feedback
+    store = await get_behavioral_store()
+    if store:
+        store.client.table('empathy_feedback').insert({
+            'user_id': user_id,
+            'interaction_context': interaction_context,
+            'how_it_felt': how_it_felt,
+            'specific_feedback': specific_feedback,
+            'suggested_approach': suggested_approach,
+            'recorded_at': datetime.utcnow().isoformat()
+        }).execute()
+    
+    # Generate response based on feedback type
+    response_message = _generate_feedback_response(how_it_felt, specific_feedback)
+    
+    return {
+        "status": "feedback_recorded",
+        "adjustment_made": True,
+        "future_interventions_will": _describe_adjustment(how_it_felt),
+        "message": response_message,
+        "thank_you": "Your honesty makes me a better partner"
+    }
+
+
+@router.get("/partnership-contract")
+async def get_partnership_contract(
+    user: User = Depends(get_current_user)
+):
+    """
+    View the current partnership terms between you and Spirit.
+    
+    This is our working agreement—what you can expect from me,
+    what I need from you, and how we'll collaborate.
+    """
+    user_id = str(user.id)
+    
+    # Check if contract exists
+    store = await get_behavioral_store()
+    if not store:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    
+    contract_data = store.client.table('partnership_contracts').select('*').eq(
+        'user_id', user_id
+    ).execute()
+    
+    if not contract_data.data:
+        return {
+            "status": "no_contract",
+            "message": "Complete onboarding to establish partnership terms",
+            "can_establish": True
+        }
+    
+    contract = contract_data.data[0]
+    terms = contract.get('terms', {})
+    
+    return {
+        "status": "active",
+        "established_at": contract.get('established_at'),
+        "spirit_commitments": {
+            "will_do": terms.get('spirit_commitments', {}).get('will_do', []),
+            "wont_do": terms.get('spirit_commitments', {}).get('wont_do', [])
+        },
+        "your_commitments": {
+            "will_do": terms.get('user_commitments', {}).get('will_do', []),
+            "wont_do": terms.get('user_commitments', {}).get('wont_do', [])
+        },
+        "collaboration_rules": terms.get('collaboration_rules', {}),
+        "revision_terms": terms.get('revision_terms', "Either party can suggest revisions"),
+        "message": "This contract exists to ensure a healthy working relationship"
+    }
+
+
+@router.post("/partnership-contract/revise")
+async def request_contract_revision(
+    requested_changes: Dict[str, Any],
+    reason: str,
+    user: User = Depends(get_current_user)
+):
+    """
+    Request changes to the partnership terms.
+    
+    Partnerships evolve. If something isn't working—frequency of check-ins,
+    communication style, intervention types—let's discuss it.
+    """
+    user_id = str(user.id)
+    
+    contract = PartnershipContract(user_id)
+    
+    # Log revision request
+    store = await get_behavioral_store()
+    if store:
+        # Get current contract
+        current = store.client.table('partnership_contracts').select('*').eq(
+            'user_id', user_id
+        ).execute()
+        
+        if current.data:
+            # Update with revision request
+            revision_entry = {
+                'requested_at': datetime.utcnow().isoformat(),
+                'requested_by': 'user',
+                'reason': reason,
+                'proposed_changes': requested_changes,
+                'status': 'pending_discussion'
+            }
+            
+            revision_history = current.data[0].get('revision_history', [])
+            revision_history.append(revision_entry)
+            
+            store.client.table('partnership_contracts').update({
+                'revision_history': revision_history
+            }).eq('user_id', user_id).execute()
+    
+    return {
+        "status": "revision_requested",
+        "requested_by": "user",
+        "reason_recorded": reason,
+        "proposed_changes": requested_changes,
+        "next_steps": "Spirit will review and propose a discussion or updated terms within 24 hours",
+        "note": "This is a partnership—your needs changing is expected and welcome"
+    }
+
+
+@router.get("/agency-status")
+async def get_agency_status(
+    user: User = Depends(get_current_user)
+):
+    """
+    Check your current agency preservation status.
+    
+    Shows how much control you have in the relationship,
+    recent interventions, and any agency erosion concerns.
+    """
+    user_id = str(user.id)
+    
+    monitor = AgencyPreservationMonitor(user_id)
+    
+    # Get recent intervention history
+    store = await get_behavioral_store()
+    if not store:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    
+    # Recent interventions
+    day_ago = (datetime.utcnow() - timedelta(hours=24)).isoformat()
+    recent = store.client.table('interventions_delivered').select('*').eq(
+        'user_id', user_id
+    ).gte('delivered_at', day_ago).execute()
+    
+    # Agency preservation blocks
+    blocks = store.client.table('agency_preservation_logs').select('*').eq(
+        'user_id', user_id
+    ).gte('logged_at', day_ago).execute()
+    
+    interventions = recent.data if recent.data else []
+    agency_blocks = blocks.data if blocks.data else []
+    
+    # Calculate metrics
+    total_interventions = len(interventions)
+    blocked_for_agency = len(agency_blocks)
+    
+    # Check for concerning patterns
+    concerns = []
+    if total_interventions > 5:
+        concerns.append("High intervention frequency detected")
+    if blocked_for_agency > 2:
+        concerns.append("Multiple interventions blocked for agency preservation")
+    
+    # Get current agency score from empathy profile
+    engine = EmpathyCalibrationEngine(user_id)
+    await engine.load_profile()
+    agency_score = engine.profile.challenge_tolerance  # Proxy for agency
+    
+    return {
+        "your_agency_status": {
+            "score": agency_score,
+            "interpretation": "High agency" if agency_score > 0.7 else "Developing agency" if agency_score > 0.4 else "Agency being established",
+            "trend": "stable"  # Would calculate from history
+        },
+        "recent_activity_24h": {
+            "interventions_received": total_interventions,
+            "agency_preservation_blocks": blocked_for_agency,
+            "block_rate": blocked_for_agency / total_interventions if total_interventions > 0 else 0
+        },
+        "concerns": concerns if concerns else ["None detected"],
+        "your_control": {
+            "can_pause_anytime": True,
+            "can_revise_contract": True,
+            "can_provide_feedback": True,
+            "can_skip_interventions": True,
+            "message": "You are always in control. Spirit advises, you decide."
+        }
+    }
+
+
+@router.post("/reset-profile")
+async def reset_empathy_profile(
+    reason: str,
+    preserve_onboarding: bool = True,
+    user: User = Depends(get_current_user)
+):
+    """
+    Reset your empathy profile to defaults.
+    
+    Use if Spirit has learned wrong patterns, or you want a fresh start.
+    Onboarding insights can be preserved or cleared.
+    """
+    user_id = str(user.id)
+    
+    store = await get_behavioral_store()
+    if not store:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    
+    # Archive old profile
+    old_profile = store.client.table('empathy_profiles').select('*').eq(
+        'user_id', user_id
+    ).execute()
+    
+    if old_profile.data:
+        store.client.table('empathy_profile_archive').insert({
+            'user_id': user_id,
+            'archived_profile': old_profile.data[0],
+            'reset_reason': reason,
+            'reset_at': datetime.utcnow().isoformat(),
+            'preserved_onboarding': preserve_onboarding
+        }).execute()
+    
+    # Create new default profile
+    store.client.table('empathy_profiles').upsert({
+        'user_id': user_id,
+        'validation_need': 0.5,
+        'challenge_tolerance': 0.5,
+        'preferred_tone': 'warm',
+        'trigger_sensitivity': {},
+        'successful_approaches': [],
+        'failed_approaches': [],
+        'last_updated': datetime.utcnow().isoformat()
+    }).execute()
+    
+    # Optionally clear onboarding
+    if not preserve_onboarding:
+        store.client.table('belief_networks').update({
+            'onboarded_at': None,
+            'beliefs': {'reset': True}
+        }).eq('user_id', user_id).execute()
+    
+    return {
+        "status": "profile_reset",
+        "reason_recorded": reason,
+        "preserved_onboarding": preserve_onboarding,
+        "message": "Starting fresh. Spirit will relearn your preferences from new interactions.",
+        "next_steps": "Use /feedback after interactions to accelerate learning"
+    }
+
+
+@router.get("/intervention-history")
+async def get_intervention_history(
+    days: int = 7,
+    include_blocked: bool = True,
+    user: User = Depends(get_current_user)
+):
+    """
+    View history of interventions and your responses.
+    
+    Transparency: See what Spirit suggested, when, and how you responded.
+    """
+    user_id = str(user.id)
+    
+    store = await get_behavioral_store()
+    if not store:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    
+    since = (datetime.utcnow() - timedelta(days=days)).isoformat()
+    
+    # Get delivered interventions
+    delivered = store.client.table('interventions_delivered').select('*').eq(
+        'user_id', user_id
+    ).gte('delivered_at', since).order('delivered_at', desc=True).execute()
+    
+    # Get blocked interventions if requested
+    blocked = None
+    if include_blocked:
+        blocked = store.client.table('blocked_interventions').select('*').eq(
+            'user_id', user_id
+        ).gte('blocked_at', since).order('blocked_at', desc=True).execute()
+    
+    # Calculate effectiveness
+    interventions = delivered.data if delivered.data else []
+    followed = sum(1 for i in interventions if i.get('user_response') == 'followed')
+    ignored = sum(1 for i in interventions if i.get('user_response') == 'ignored')
+    
+    return {
+        "period_days": days,
+        "interventions_delivered": len(interventions),
+        "effectiveness": {
+            "followed": followed,
+            "ignored": ignored,
+            "follow_rate": followed / len(interventions) if interventions else 0
+        },
+        "interventions": [
+            {
+                "timestamp": i.get('delivered_at'),
+                "type": i.get('intervention_type'),
+                "message_preview": i.get('message', '')[:100] + "..." if i.get('message') else None,
+                "your_response": i.get('user_response'),
+                "empathy_mode": i.get('empathy_mode')
+            }
+            for i in interventions[:10]  # Last 10
+        ],
+        "blocked_interventions": len(blocked.data) if blocked and blocked.data else 0,
+        "transparency_note": "This is your data. You can export or delete it anytime."
+    }
+
+
+# Helper functions
+
+def _interpret_validation_need(score: float) -> str:
+    if score > 0.8:
+        return "You need significant affirmation before receiving challenges. Spirit will lead with validation."
+    elif score > 0.5:
+        return "You appreciate some validation before direct feedback. Spirit will balance both."
+    else:
+        return "You prefer direct feedback without much preamble. Spirit will be more direct."
+
+
+def _interpret_challenge_tolerance(score: float) -> str:
+    if score > 0.8:
+        return "You welcome direct challenges and tough feedback. Spirit will push you hard."
+    elif score > 0.5:
+        return "You can handle moderate challenge. Spirit will push but check in."
+    else:
+        return "You prefer gentle guidance. Spirit will be supportive rather than challenging."
+
+
+def _generate_feedback_response(how_it_felt: str, specific_feedback: Optional[str]) -> str:
+    responses = {
+        "supportive": "I'm glad that felt supportive. I'll continue with that approach.",
+        "helpful": "Good to know that was helpful. I'll remember what worked.",
+        "just_right": "Perfect—I'll aim for that balance consistently.",
+        "patronizing": "I apologize for coming across that way. I'll be more direct and respect your competence.",
+        "dismissive": "I'm sorry—I didn't mean to dismiss your experience. I'll listen more carefully.",
+        "too_intense": "Noted—I'll dial back the intensity and give you more space.",
+        "annoying": "Understood. I'll reduce frequency and only reach out when truly valuable.",
+        "too_gentle": "Got it—you can handle more directness. I'll be more straightforward."
+    }
+    return responses.get(how_it_felt, "Thank you for the feedback. I'll adjust.")
+
+
+def _describe_adjustment(how_it_felt: str) -> str:
+    adjustments = {
+        "supportive": "continue emphasizing validation and encouragement",
+        "helpful": "maintain practical, solution-oriented approach",
+        "just_right": "keep current balance of support and challenge",
+        "patronizing": "be more direct and avoid over-explaining",
+        "dismissive": "listen more and validate before advising",
+        "too_intense": "reduce urgency and pressure in messaging",
+        "annoying": "decrease frequency and increase relevance threshold",
+        "too_gentle": "increase directness and challenge level"
+    }
+    return adjustments.get(how_it_felt, "adapt based on your feedback")
