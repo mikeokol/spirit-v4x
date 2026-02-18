@@ -2,7 +2,7 @@
 Proactive Agent Loop: Spirit's autonomous operation system.
 Predicts, schedules, and executes interventions without waiting for user input.
 The goal: intervene before the user fails, not after.
-v1.4: Integrated Multi-Agent Debate (MAO) and Ethical Guardrails
+v1.5: Human-centered with empathy calibration, agency preservation, and onboarding awareness.
 """
 
 import asyncio
@@ -17,9 +17,13 @@ from spirit.services.notification_engine import NotificationEngine, Notification
 from spirit.agents.behavioral_scientist import BehavioralScientistAgent, PredictiveEngine
 from spirit.memory.episodic_memory import EpisodicMemorySystem
 from spirit.services.causal_inference import CausalInferenceEngine
-# NEW: Import MAO and Ethical Guardrails
+# NEW: Human-centered imports
 from spirit.agents.multi_agent_debate import MultiAgentDebate
-from spirit.services.ethical_guardrails import EthicalGuardrails
+from spirit.services.empathy_agency import (
+    EmpatheticInterventionWrapper,
+    AgencyInterventionType,
+    EmpathyCalibrationEngine
+)
 
 
 class PredictionHorizon(Enum):
@@ -39,39 +43,42 @@ class PredictedState:
     state_type: str  # 'vulnerability', 'opportunity', 'maintenance', 'risk'
     
     # What we predict
-    predicted_behavior: Dict[str, Any]  # e.g., {"focus_score": 0.3, "app_category": "social_media"}
+    predicted_behavior: Dict[str, Any]
     confidence: float  # 0-1
     
     # Why we predict this
-    trigger_features: Dict[str, float]  # What signals led to this prediction
-    historical_pattern_match: Optional[str]  # Which past episode this resembles
+    trigger_features: Dict[str, float]
+    historical_pattern_match: Optional[str]
     
     # What to do about it
     optimal_intervention: Optional[str]
-    intervention_window: Optional[tuple]  # (start, end) when to deliver
-    expected_outcome_if_intervene: float  # Predicted improvement
-    expected_outcome_if_ignore: float     # Predicted decline
+    intervention_window: Optional[tuple]
+    expected_outcome_if_intervene: float
+    expected_outcome_if_ignore: float
 
 
 class ProactiveScheduler:
     """
     Schedules autonomous check-ins and interventions.
-    Operates on predicted vulnerability windows, not fixed times.
-    v1.4: All interventions routed through MAO debate and ethical checks.
+    v1.5: Human-centered with empathy calibration and agency preservation.
     """
     
     def __init__(self, user_id: int):
         self.user_id = user_id
-        self.scheduled_checks: Dict[str, datetime] = {}  # check_id -> scheduled_time
+        self.scheduled_checks: Dict[str, datetime] = {}
         self.running = False
-        self.check_interval_seconds = 60  # How often to run prediction loop
+        self.check_interval_seconds = 60
         
         # Callbacks for different prediction types
         self.intervention_handlers: Dict[str, Callable] = {}
         
-        # NEW: Initialize MAO and Ethical Guardrails
+        # Core systems
         self.debate_system = MultiAgentDebate()
-        self.ethical_guardrails = EthicalGuardrails()
+        
+        # NEW: Human-centered systems
+        self.empathy_wrapper = EmpatheticInterventionWrapper(str(user_id))
+        self.onboarding_complete = False
+        self.empathy_engine = EmpathyCalibrationEngine(str(user_id))
     
     def register_handler(self, state_type: str, handler: Callable):
         """Register a function to handle predicted states."""
@@ -95,15 +102,19 @@ class ProactiveScheduler:
         self.running = False
     
     async def _run_prediction_cycle(self):
-        """
-        One cycle: predict, schedule, execute if due.
-        """
+        """One cycle: predict, schedule, execute if due."""
         now = datetime.utcnow()
         
-        # 1. Generate predictions for all horizons
+        # NEW: Check if onboarding complete before predicting
+        if not await self._check_onboarding_status():
+            print(f"User {self.user_id} onboarding not complete, skipping prediction cycle")
+            await asyncio.sleep(300)  # Check again in 5 minutes
+            return
+        
+        # Generate predictions for all horizons
         predictions = await self._generate_predictions()
         
-        # 2. For each prediction, schedule or execute
+        # For each prediction, schedule or execute
         for pred in predictions:
             check_id = f"{pred.state_type}_{pred.predicted_time.isoformat()}"
             
@@ -124,31 +135,46 @@ class ProactiveScheduler:
                 delay = (pred.predicted_time - now).total_seconds()
                 asyncio.create_task(self._delayed_execution(check_id, delay, pred))
     
+    async def _check_onboarding_status(self) -> bool:
+        """NEW: Check if user has completed rich onboarding."""
+        if self.onboarding_complete:
+            return True
+        
+        store = await get_behavioral_store()
+        if not store:
+            return True  # Default to allowing if no store
+        
+        # Check for onboarding completion
+        belief = await store.get_user_beliefs(str(self.user_id))
+        if belief and belief.get("onboarded_at"):
+            self.onboarding_complete = True
+            return True
+        
+        return False
+    
     async def _generate_predictions(self) -> List[PredictedState]:
-        """
-        Generate multi-horizon predictions for this user.
-        """
+        """Generate multi-horizon predictions for this user."""
         predictions = []
         
         # Get current context
         context = await self._get_current_context()
         
-        # IMMINENT: Next 30 minutes (based on current trajectory)
+        # IMMINENT: Next 30 minutes
         imminent = await self._predict_imminent(context)
         if imminent:
             predictions.append(imminent)
         
-        # SHORT: Next 4 hours (based on daily patterns)
+        # SHORT: Next 4 hours
         short = await self._predict_short_term(context)
         if short:
             predictions.extend(short)
         
-        # MEDIUM: Next 24 hours (based on weekly patterns + calendar)
+        # MEDIUM: Next 24 hours
         medium = await self._predict_medium_term()
         if medium:
             predictions.extend(medium)
         
-        # LONG: Next 7 days (based on trend analysis)
+        # LONG: Next 7 days
         long_term = await self._predict_long_term()
         if long_term:
             predictions.extend(long_term)
@@ -156,9 +182,7 @@ class ProactiveScheduler:
         return predictions
     
     async def _predict_imminent(self, context: Dict) -> Optional[PredictedState]:
-        """
-        Predict immediate next state (0-30 min) based on current momentum.
-        """
+        """Predict immediate next state (0-30 min) based on current momentum."""
         # Check current trajectory
         recent = context.get("recent_observations", [])
         if len(recent) < 3:
@@ -190,7 +214,7 @@ class ProactiveScheduler:
                 expected_outcome_if_ignore=0.2
             )
         
-        # If sustained focus, predict opportunity for deep work extension
+        # If sustained focus, predict opportunity
         if focus_trend > 0.7:
             return PredictedState(
                 horizon=PredictionHorizon.IMMINENT,
@@ -212,9 +236,7 @@ class ProactiveScheduler:
         return None
     
     async def _predict_short_term(self, context: Dict) -> List[PredictedState]:
-        """
-        Predict next 4 hours based on daily patterns.
-        """
+        """Predict next 4 hours based on daily patterns."""
         predictions = []
         now = datetime.utcnow()
         hour = now.hour
@@ -223,11 +245,6 @@ class ProactiveScheduler:
         store = await get_behavioral_store()
         if not store:
             return predictions
-        
-        # Query similar historical periods
-        similar_time = store.client.table('behavioral_observations').select('*').eq(
-            'user_id', str(self.user_id)
-        ).execute()  # Would filter by hour, day of week
         
         # Predict lunch slump (12-14h)
         if 11 <= hour <= 13:
@@ -264,23 +281,17 @@ class ProactiveScheduler:
         return predictions
     
     async def _predict_medium_term(self) -> List[PredictedState]:
-        """
-        Predict next 24 hours based on weekly patterns and upcoming events.
-        """
+        """Predict next 24 hours based on weekly patterns and upcoming events."""
         predictions = []
         now = datetime.utcnow()
         
         # Check tomorrow morning based on tonight's behavior
         # If high evening usage predicted, predict poor sleep and slow morning
         
-        # Would integrate with calendar API here
-        
         return predictions
     
     async def _predict_long_term(self) -> List[PredictedState]:
-        """
-        Predict next 7 days based on trend analysis.
-        """
+        """Predict next 7 days based on trend analysis."""
         predictions = []
         
         # Get trend from predictive engine
@@ -312,24 +323,20 @@ class ProactiveScheduler:
     async def _execute_intervention(self, prediction: PredictedState):
         """
         Execute the optimal intervention for a predicted state.
-        v1.4: Now routes through Ethical Guardrails → MAO Debate → Delivery
+        v1.5: Human-centered with empathy calibration and agency preservation.
         """
-        # NEW STEP 1: Ethical Guardrails Check
-        ethical_check = await self.ethical_guardrails.approve_intervention(
-            user_id=self.user_id,
-            intervention_type=prediction.state_type,
-            intensity=prediction.confidence
-        )
-        
-        if not ethical_check['approved']:
-            print(f"Intervention blocked by ethical guardrails: {ethical_check['reason']}")
-            await self._log_blocked_intervention(prediction, ethical_check['reason'])
+        # NEW: Check if onboarding complete
+        if not await self._check_onboarding_status():
+            print(f"Onboarding not complete for {self.user_id}, skipping intervention")
             return
         
-        # NEW STEP 2: Multi-Agent Debate
-        # Build user context for debate
+        # NEW: Assess emotional state
+        emotional_state = await self._assess_user_emotional_state()
+        
+        # Build context for debate
         user_context = await self._build_debate_context(prediction)
         
+        # MAO debate
         debate_result = await self.debate_system.debate_intervention(
             user_context=user_context,
             proposed_intervention=prediction.optimal_intervention or "default_intervention",
@@ -340,19 +347,100 @@ class ProactiveScheduler:
         )
         
         if not debate_result['proceed']:
-            print(f"Intervention blocked by adversary: {debate_result.get('adversary_concerns', 'unknown objection')}")
+            print(f"Adversary blocked intervention for {self.user_id}")
             await self._log_adversary_objection(prediction, debate_result)
             return
         
-        # STEP 3: Execute debated intervention
+        # NEW: Empathy calibration and agency preservation
+        intervention_type = self._map_to_agency_type(debate_result, prediction)
+        
+        empathetic_delivery = await self.empathy_wrapper.deliver_intervention(
+            raw_intervention=debate_result['message'],
+            context=prediction.state_type,
+            user_emotional_state=emotional_state,
+            intervention_type=intervention_type
+        )
+        
+        if not empathetic_delivery['delivered']:
+            # Agency preservation blocked
+            print(f"Agency preservation blocked intervention: {empathetic_delivery['reason']}")
+            await self._log_agency_preservation_block(prediction, empathetic_delivery)
+            return
+        
+        # Execute with calibrated message
         handler = self.intervention_handlers.get(prediction.state_type)
         
         if handler:
-            # Pass debate result to handler so it can use the refined message
-            await handler(prediction, self.user_id, debate_result)
+            await handler(prediction, self.user_id, {
+                **debate_result,
+                'message': empathetic_delivery['message'],
+                'empathy_mode': empathetic_delivery['empathy_mode'],
+                'agency_preserved': True
+            })
         else:
-            # Default: send notification with debated message
-            await self._default_intervention(prediction, debate_result)
+            await self._default_intervention(prediction, {
+                **debate_result,
+                'message': empathetic_delivery['message'],
+                'empathy_mode': empathetic_delivery['empathy_mode'],
+                'agency_preserved': True
+            })
+    
+    async def _assess_user_emotional_state(self) -> str:
+        """NEW: Assess current emotional state from recent data."""
+        store = await get_behavioral_store()
+        if not store:
+            return "neutral"
+        
+        # Check recent reflections
+        recent_reflections = store.client.table('execution_reflections').select('*').eq(
+            'user_id', str(self.user_id)
+        ).order('created_at', desc=True).limit(3).execute()
+        
+        if recent_reflections.data:
+            moods = [r.get('mood_score') for r in recent_reflections.data if r.get('mood_score')]
+            if moods:
+                avg_mood = sum(moods) / len(moods)
+                if avg_mood < 4:
+                    return "struggling"
+                elif avg_mood > 7:
+                    return "positive"
+        
+        # Check recent execution success
+        from spirit.db import async_session
+        from spirit.models import Execution, Goal, GoalState
+        from sqlalchemy import select
+        
+        async with async_session() as session:
+            goal = await session.scalar(
+                select(Goal).where(Goal.user_id == self.user_id, Goal.state == GoalState.active)
+            )
+            if goal:
+                recent_execs = await session.execute(
+                    select(Execution).where(
+                        Execution.goal_id == goal.id
+                    ).order_by(Execution.day.desc()).limit(3)
+                )
+                execs = recent_execs.scalars().all()
+                if execs and not any(e.executed for e in execs):
+                    return "discouraged"
+        
+        return "neutral"
+    
+    def _map_to_agency_type(self, debate_result: Dict, prediction: PredictedState) -> AgencyInterventionType:
+        """NEW: Map MAO result to agency-preserving intervention type."""
+        # If high confidence and urgent, could be directive
+        if prediction.confidence > 0.8 and prediction.state_type == "vulnerability":
+            return AgencyInterventionType.DIRECTIVE
+        
+        # Default to collaborative
+        if debate_result.get('consensus_reached'):
+            return AgencyInterventionType.COLLABORATION
+        
+        # If suggestion-heavy, use question format
+        if "suggest" in debate_result.get('message', '').lower():
+            return AgencyInterventionType.QUESTION
+        
+        return AgencyInterventionType.SUGGESTION
     
     async def _build_debate_context(self, prediction: PredictedState) -> Dict:
         """Build context for MAO debate."""
@@ -382,7 +470,7 @@ class ProactiveScheduler:
         return {
             'current_state': prediction.state_type,
             'recent_pattern': prediction.historical_pattern_match,
-            'goal_progress': 0.5,  # Would fetch from goals
+            'goal_progress': 0.5,
             'rejection_rate': rejection_rate,
             'interventions_today': interventions_today,
             'predicted_vulnerability': prediction.state_type == 'vulnerability',
@@ -393,7 +481,7 @@ class ProactiveScheduler:
         """Default intervention: smart notification with debated message."""
         engine = NotificationEngine(self.user_id)
         
-        # Use debated message if available, otherwise generate default
+        # Use debated message if available
         if debate_result and debate_result.get('message'):
             title = "Spirit"
             body = debate_result['message']
@@ -409,7 +497,10 @@ class ProactiveScheduler:
                 "confidence": prediction.confidence,
                 "expected_outcome": prediction.expected_outcome_if_intervene,
                 "debate_validated": debate_result is not None,
-                "debate_rounds": debate_result.get('debate_rounds', 0) if debate_result else 0
+                "debate_rounds": debate_result.get('debate_rounds', 0) if debate_result else 0,
+                # NEW: Human-centered metadata
+                "empathy_mode": debate_result.get('empathy_mode', 'balanced') if debate_result else 'balanced',
+                "agency_preserved": debate_result.get('agency_preserved', True) if debate_result else True
             }
         }
         
@@ -470,19 +561,10 @@ class ProactiveScheduler:
                 'expected_outcome': prediction.expected_outcome_if_intervene,
                 'debate_validated': debate_result is not None,
                 'debate_rounds': debate_result.get('debate_rounds', 0) if debate_result else 0,
-                'consensus_reached': debate_result.get('consensus_reached', False) if debate_result else False
-            }).execute()
-    
-    async def _log_blocked_intervention(self, prediction: PredictedState, reason: str):
-        """Log when ethical guardrails block an intervention."""
-        store = await get_behavioral_store()
-        if store:
-            store.client.table('blocked_interventions').insert({
-                'user_id': str(self.user_id),
-                'predicted_state': prediction.state_type,
-                'blocked_reason': reason,
-                'blocked_at': datetime.utcnow().isoformat(),
-                'confidence': prediction.confidence
+                'consensus_reached': debate_result.get('consensus_reached', False) if debate_result else False,
+                # NEW: Human-centered logging
+                'empathy_mode': debate_result.get('empathy_mode') if debate_result else None,
+                'agency_preserved': debate_result.get('agency_preserved', True) if debate_result else True
             }).execute()
     
     async def _log_adversary_objection(self, prediction: PredictedState, debate_result: Dict):
@@ -494,6 +576,20 @@ class ProactiveScheduler:
                 'predicted_state': prediction.state_type,
                 'objection': debate_result.get('adversary_concerns', 'unknown'),
                 'debate_rounds': debate_result.get('debate_rounds', 0),
+                'intervention_type': prediction.optimal_intervention,
+                'logged_at': datetime.utcnow().isoformat()
+            }).execute()
+    
+    async def _log_agency_preservation_block(self, prediction: PredictedState, delivery_result: Dict):
+        """NEW: Log when agency preservation blocks an intervention."""
+        store = await get_behavioral_store()
+        if store:
+            store.client.table('agency_preservation_logs').insert({
+                'log_id': str(uuid4()),
+                'user_id': str(self.user_id),
+                'predicted_state': prediction.state_type,
+                'block_reason': delivery_result.get('reason'),
+                'agency_impact_score': delivery_result.get('agency_impact'),
                 'logged_at': datetime.utcnow().isoformat()
             }).execute()
 
@@ -510,9 +606,7 @@ class AutonomousExperimentRunner:
         self.min_hours_between_experiments = 4
     
     async def design_and_queue_experiment(self, context: Dict):
-        """
-        Design a micro-experiment based on current uncertainty.
-        """
+        """Design a micro-experiment based on current uncertainty."""
         # Check if we should run experiment now
         if not await self._can_run_experiment():
             return
@@ -670,7 +764,9 @@ class GlobalProactiveOrchestrator:
                 "action": "focus_reset",
                 "data": {
                     "debate_validated": debate_result is not None,
-                    "debate_rounds": debate_result.get('debate_rounds', 0) if debate_result else 0
+                    "debate_rounds": debate_result.get('debate_rounds', 0) if debate_result else 0,
+                    "empathy_mode": debate_result.get('empathy_mode', 'balanced') if debate_result else 'balanced',
+                    "agency_preserved": debate_result.get('agency_preserved', True) if debate_result else True
                 }
             },
             priority=NotificationPriority.HIGH,
@@ -695,7 +791,9 @@ class GlobalProactiveOrchestrator:
                 "action": "extend_focus",
                 "data": {
                     "debate_validated": debate_result is not None,
-                    "debate_rounds": debate_result.get('debate_rounds', 0) if debate_result else 0
+                    "debate_rounds": debate_result.get('debate_rounds', 0) if debate_result else 0,
+                    "empathy_mode": debate_result.get('empathy_mode', 'balanced') if debate_result else 'balanced',
+                    "agency_preserved": debate_result.get('agency_preserved', True) if debate_result else True
                 }
             },
             priority=NotificationPriority.NORMAL,
@@ -716,7 +814,9 @@ class GlobalProactiveOrchestrator:
                 "action": "preventive_break",
                 "data": {
                     "debate_validated": debate_result is not None,
-                    "debate_rounds": debate_result.get('debate_rounds', 0) if debate_result else 0
+                    "debate_rounds": debate_result.get('debate_rounds', 0) if debate_result else 0,
+                    "empathy_mode": debate_result.get('empathy_mode', 'balanced') if debate_result else 'balanced',
+                    "agency_preserved": debate_result.get('agency_preserved', True) if debate_result else True
                 }
             },
             priority=NotificationPriority.NORMAL,
