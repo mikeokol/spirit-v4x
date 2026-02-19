@@ -1,9 +1,11 @@
 """
-Spirit Behavioral Research Agent - Main Application
+Spirit Behavioral Research Agent - Main Application v2.0
 Continuity ledger + Behavioral research + Causal inference + Goal integration 
 + Intelligence + Memory + Proactive Agent Loop + Real-time Processing 
 + Advanced Causal Discovery + Multi-Agent Debate + Belief Network 
 + Ethical Guardrails + Memory Consolidation + Human-Centered Systems
++ Reality Filter Engine + Personal Evidence Ladder + Disproven Hypothesis Archive
++ Human Operating Model (Mechanistic hypothesis generation)
 """
 
 import asyncio
@@ -16,6 +18,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from spirit.config import settings
 from spirit.db import create_db_and_tables, verify_database_connections
 from spirit.db.supabase_client import close_behavioral_store, get_behavioral_store
+
+# Existing routers
 from spirit.api import auth, goals, trajectory, strategic, anchors, calibrate, debug_trace
 from spirit.api.ingestion import router as ingestion_router
 from spirit.api.causal import router as causal_router
@@ -27,19 +31,172 @@ from spirit.api.proactive import router as proactive_router
 from spirit.api.realtime_causal import router as realtime_causal_router
 from spirit.api.belief import router as belief_router
 from spirit.api.ethical import router as ethical_router
-# NEW: Human-centered system routers
 from spirit.api.onboarding import router as onboarding_router
 from spirit.api.empathy import router as empathy_router
+
+# NEW: RFE API endpoints
+from spirit.api.rfe import router as rfe_router
+
+# Core systems
 from spirit.agents.proactive_loop import get_orchestrator
 from spirit.streaming.realtime_pipeline import get_stream_processor
 
 
-# NEW: Memory consolidation scheduler
+# NEW: RFE background processors
+async def rfe_evidence_processor():
+    """
+    Background task that processes pending observations through RFE.
+    Runs evidence grading, confound detection, and routes to appropriate handler.
+    """
+    from spirit.evidence.core import RealityFilterEngine
+    
+    rfe = RealityFilterEngine()
+    store = get_behavioral_store()
+    
+    if not store:
+        print("RFE processor: No Supabase, skipping")
+        return
+    
+    while True:
+        try:
+            # Get unprocessed observations from last 5 minutes
+            five_min_ago = (datetime.utcnow() - timedelta(minutes=5)).isoformat()
+            
+            pending = store.client.table('behavioral_observations').select('*').eq(
+                'rfe_processed', False  # NEW: Flag for RFE processing
+            ).gte('timestamp', five_min_ago).limit(100).execute()
+            
+            if pending.data:
+                for obs in pending.data:
+                    # Process through RFE
+                    result = await rfe.process_observation(obs, obs['user_id'])
+                    
+                    # Mark as processed
+                    store.client.table('behavioral_observations').update({
+                        'rfe_processed': True,
+                        'rfe_decision': result['action'],
+                        'pel_level': result['evidence_grading']['level_value'],
+                        'evidence_confidence': result['evidence_grading']['confidence'],
+                        'confounds_detected': result['confound_assessment']['confounds_detected']
+                    }).eq('observation_id', obs['observation_id']).execute()
+                    
+                    # If experiment proposed, queue it
+                    if result.get('experiment_proposed'):
+                        store.client.table('experiment_queue').insert({
+                            'user_id': obs['user_id'],
+                            'experiment_proposal': result['experiment_proposed'],
+                            'proposed_at': datetime.utcnow().isoformat(),
+                            'status': 'pending_user_consent'
+                        }).execute()
+                    
+                    print(f"RFE processed {obs['observation_id']}: {result['action']}")
+            
+            # Process every 10 seconds
+            await asyncio.sleep(10)
+            
+        except Exception as e:
+            print(f"RFE processor error: {e}")
+            await asyncio.sleep(30)
+
+
+async def evidence_upgrade_monitor():
+    """
+    Background task that monitors evidence for potential upgrades.
+    Runs daily to check if Level 2 evidence can be upgraded to Level 3+.
+    """
+    from spirit.evidence.core import RealityFilterEngine, EvidenceLevel
+    
+    rfe = RealityFilterEngine()
+    store = get_behavioral_store()
+    
+    if not store:
+        return
+    
+    while True:
+        try:
+            now = datetime.utcnow()
+            
+            # Run at 2 AM (before memory consolidation)
+            if now.hour == 2 and now.minute < 5:
+                print("Starting evidence upgrade check...")
+                
+                # Get Level 2 evidence older than 3 days
+                three_days_ago = (now - timedelta(days=3)).isoformat()
+                
+                candidates = store.client.table('evidence_grading').select('*').eq(
+                    'level', EvidenceLevel.CONTEXTUALIZED_PATTERN.value
+                ).lt('graded_at', three_days_ago).limit(100).execute()
+                
+                upgraded_count = 0
+                for evidence in candidates.data if candidates.data else []:
+                    upgraded = await rfe.should_upgrade_evidence(
+                        _dict_to_grading(evidence),
+                        evidence['user_id']
+                    )
+                    
+                    if upgraded and upgraded.level != EvidenceLevel.CONTEXTUALIZED_PATTERN:
+                        upgraded_count += 1
+                
+                print(f"Evidence upgrade check complete: {upgraded_count} upgraded")
+                
+                # Sleep 2 hours to prevent double-run
+                await asyncio.sleep(7200)
+            else:
+                await asyncio.sleep(60)
+                
+        except Exception as e:
+            print(f"Evidence upgrade monitor error: {e}")
+            await asyncio.sleep(300)
+
+
+async def hypothesis_falsification_monitor():
+    """
+    Background task that monitors active hypotheses for falsification.
+    Auto-archives falsified hypotheses to DHA.
+    """
+    from spirit.memory.disproven_hypothesis_archive import HypothesisFalsificationTracker
+    
+    store = get_behavioral_store()
+    if not store:
+        return
+    
+    while True:
+        try:
+            # Get active hypotheses with recent observations
+            active = store.client.table('active_hypotheses').select('*').eq(
+                'status', 'active'
+            ).execute()
+            
+            for hyp in active.data if active.data else []:
+                tracker = HypothesisFalsificationTracker(hyp['user_id'])
+                
+                # Get recent observations against this hypothesis
+                recent = store.client.table('hypothesis_observations').select('*').eq(
+                    'hypothesis_id', hyp['hypothesis_id']
+                ).order('observed_at', desc=True).limit(5).execute()
+                
+                for obs in recent.data if recent.data else []:
+                    result = await tracker.record_observation(
+                        hyp['hypothesis_id'],
+                        obs,
+                        supports=obs.get('supports_hypothesis', False),
+                        confidence=obs.get('confidence', 0.5)
+                    )
+                    
+                    if result.get('status') == 'falsified':
+                        print(f"Hypothesis {hyp['hypothesis_id']} falsified and archived")
+                        break
+            
+            await asyncio.sleep(300)  # Check every 5 minutes
+            
+        except Exception as e:
+            print(f"Hypothesis falsification monitor error: {e}")
+            await asyncio.sleep(600)
+
+
+# Existing schedulers (preserved)
 async def memory_consolidation_scheduler():
-    """
-    Background task that runs at 3 AM to compress episodic memories 
-    into semantic insights. Runs daily.
-    """
+    """Background task that runs at 3 AM to compress episodic memories."""
     from spirit.memory.consolidation import MemoryConsolidation
     
     consolidator = MemoryConsolidation()
@@ -47,30 +204,76 @@ async def memory_consolidation_scheduler():
     while True:
         now = datetime.utcnow()
         
-        # Run at 3:00 AM
         if now.hour == 3 and now.minute == 0:
             print("Starting memory consolidation (3 AM)...")
             try:
+                # NEW: Apply Memory Admission Control before consolidation
+                await _apply_memory_admission_control()
+                
                 await consolidator.consolidate_all_users()
                 print("Memory consolidation complete")
             except Exception as e:
                 print(f"Memory consolidation error: {e}")
             
-            # Sleep 61 minutes to prevent double-run
             await asyncio.sleep(3660)
         else:
-            # Check every minute
             await asyncio.sleep(60)
 
 
-# NEW: MAO debate processor
+async def _apply_memory_admission_control():
+    """NEW: Filter observations before consolidation using RFE criteria."""
+    from spirit.evidence.core import MemoryAdmissionControl
+    
+    admission = MemoryAdmissionControl()
+    store = get_behavioral_store()
+    
+    if not store:
+        return
+    
+    # Get yesterday's unprocessed observations
+    yesterday = (datetime.utcnow() - timedelta(days=1)).strftime('%Y-%m-%d')
+    
+    observations = store.client.table('behavioral_observations').select('*').eq(
+        'date', yesterday
+    ).eq('memory_admission_processed', False).limit(10000).execute()
+    
+    retained = 0
+    discarded = 0
+    
+    for obs in observations.data if observations.data else []:
+        # Get evidence grading
+        grading = store.client.table('evidence_grading').select('*').eq(
+            'observation_id', obs['observation_id']
+        ).execute()
+        
+        evidence_grade = grading.data[0] if grading.data else None
+        
+        retain, category, priority = await admission.evaluate_for_retention(
+            obs, 
+            evidence_grade,
+            obs['user_id']
+        )
+        
+        # Mark decision
+        store.client.table('behavioral_observations').update({
+            'memory_admission_processed': True,
+            'retain_in_semantic_memory': retain,
+            'retention_category': category,
+            'retention_priority': priority
+        }).eq('observation_id', obs['observation_id']).execute()
+        
+        if retain:
+            retained += 1
+        else:
+            discarded += 1
+    
+    print(f"Memory Admission Control: {retained} retained, {discarded} discarded "
+          f"({discarded/(retained+discarded)*100:.1f}% discard rate)")
+
+
 async def mao_debate_processor():
-    """
-    Background task that processes pending intervention recommendations
-    through Multi-Agent Debate before they reach the proactive loop.
-    """
+    """Background task that processes pending interventions through MAO debate."""
     from spirit.agents.multi_agent_debate import MultiAgentDebate
-    from spirit.db.supabase_client import get_behavioral_store
     
     debate_system = MultiAgentDebate()
     store = get_behavioral_store()
@@ -81,30 +284,34 @@ async def mao_debate_processor():
     
     while True:
         try:
-            # Get all users with pending recommendations
+            # NEW: Only process interventions that passed RFE
             pending = store.client.table('intervention_recommendations').select(
                 'user_id'
-            ).eq('status', 'pending_debate').execute()
+            ).eq('status', 'pending_debate').eq(
+                'rfe_approved', True  # NEW: Only RFE-approved interventions
+            ).execute()
             
             if pending.data:
-                # Get unique user IDs
                 user_ids = list(set([p['user_id'] for p in pending.data]))
                 
                 for user_id in user_ids:
-                    # Get recommendations for this user
-                    user_pending = await store.get_pending_recommendations(user_id, limit=5)
+                    user_pending = store.client.table('intervention_recommendations').select('*').eq(
+                        'user_id', user_id
+                    ).eq('status', 'pending_debate').eq('rfe_approved', True).limit(5).execute()
                     
-                    for rec in user_pending:
-                        # Build context for debate
+                    for rec in user_pending.data:
                         context = {
                             'current_state': rec.get('recommended_action', 'unknown'),
                             'recent_pattern': rec.get('hypothesis', ''),
-                            'goal_progress': 0.5,  # Would fetch from goals
-                            'rejection_rate': 0.0,  # Would calculate from history
-                            'interventions_today': len(user_pending)
+                            'goal_progress': rec.get('goal_progress', 0.5),
+                            'rejection_rate': rec.get('rejection_rate', 0.0),
+                            'interventions_today': len(user_pending.data),
+                            # NEW: Include RFE metadata
+                            'pel_level': rec.get('pel_level'),
+                            'evidence_confidence': rec.get('evidence_confidence'),
+                            'confounds_controlled': rec.get('confounds_controlled', [])
                         }
                         
-                        # Run debate
                         debate_result = await debate_system.debate_intervention(
                             user_context=context,
                             proposed_intervention=rec.get('recommended_action'),
@@ -114,21 +321,16 @@ async def mao_debate_processor():
                             }
                         )
                         
-                        # Update recommendation status
-                        if debate_result['proceed']:
-                            new_status = 'approved_for_delivery'
-                        else:
-                            new_status = 'blocked_by_adversary'
+                        new_status = 'approved_for_delivery' if debate_result['proceed'] else 'blocked_by_adversary'
                         
-                        await store.update_recommendation_status(
-                            recommendation_id=rec['recommendation_id'],
-                            status=new_status,
-                            debate_result=debate_result
-                        )
+                        store.client.table('intervention_recommendations').update({
+                            'status': new_status,
+                            'debate_result': debate_result,
+                            'mao_processed_at': datetime.utcnow().isoformat()
+                        }).eq('recommendation_id', rec['recommendation_id']).execute()
                         
                         print(f"MAO debate for {user_id}: {rec['recommended_action']} -> {new_status}")
             
-            # Process every 30 seconds
             await asyncio.sleep(30)
             
         except Exception as e:
@@ -138,35 +340,34 @@ async def mao_debate_processor():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Manage application lifecycle with new components."""
+    """Manage application lifecycle with RFE components."""
     
     print("=" * 60)
-    print("SPIRIT INITIALIZING")
+    print("SPIRIT INITIALIZING v2.0")
     print("=" * 60)
     
-    # Verify database connections first
+    # Verify database connections
     db_status = await verify_database_connections()
     print(f"Database status: {db_status}")
     
-    # Initialize SQLite (existing behavior)
+    # Initialize SQLite (existing)
     if settings.env != "prod":
         await create_db_and_tables()
         print(f"✓ SQLite initialized ({settings.env} mode)")
     
-    # Initialize Supabase behavioral store if configured
+    # Initialize Supabase
     if settings.supabase_url:
         store = get_behavioral_store()
         if store and store.client:
             print("✓ Supabase behavioral store connected")
             
-            # NEW: Check component tables
             try:
                 store._ensure_tables()
                 print("✓ Component tables verified")
             except Exception as e:
                 print(f"⚠ Component tables warning: {e}")
         else:
-            print("✗ Supabase URL configured but connection failed - behavioral features disabled")
+            print("✗ Supabase connection failed - behavioral features disabled")
     
     # Initialize global proactive orchestrator
     orchestrator = get_orchestrator()
@@ -175,20 +376,31 @@ async def lifespan(app: FastAPI):
     # Start real-time stream processor
     processor = get_stream_processor()
     asyncio.create_task(processor.start())
-    print("✓ Real-time stream processor started (sub-second anomaly detection)")
+    print("✓ Real-time stream processor started")
     
-    # NEW: Start memory consolidation scheduler
+    # NEW: Start RFE evidence processor (sub-second processing)
+    asyncio.create_task(rfe_evidence_processor())
+    print("✓ RFE evidence processor started")
+    
+    # NEW: Start evidence upgrade monitor
+    asyncio.create_task(evidence_upgrade_monitor())
+    print("✓ Evidence upgrade monitor started")
+    
+    # NEW: Start hypothesis falsification monitor
+    asyncio.create_task(hypothesis_falsification_monitor())
+    print("✓ Hypothesis falsification monitor started")
+    
+    # Existing processors
     asyncio.create_task(memory_consolidation_scheduler())
-    print("✓ Memory consolidation scheduler started (runs at 3 AM)")
+    print("✓ Memory consolidation scheduler started (3 AM)")
     
-    # NEW: Start MAO debate processor
     asyncio.create_task(mao_debate_processor())
     print("✓ Multi-Agent Debate processor started")
     
     print("=" * 60)
-    print("SPIRIT v1.4.0 ONLINE")
+    print("SPIRIT v2.0 ONLINE")
     print("Features: MAO | Belief Network | Ethical Guardrails | Memory Consolidation")
-    print("NEW: Rich Onboarding | Empathy Calibration | Agency Preservation")
+    print("NEW: RFE | PEL | DHA | HOM | Mechanistic Hypothesis Generation")
     print("=" * 60)
     
     yield
@@ -198,18 +410,15 @@ async def lifespan(app: FastAPI):
     print("SPIRIT SHUTTING DOWN")
     print("=" * 60)
     
-    # Cleanup: stop stream processor
     print("Stopping stream processor...")
     processor = get_stream_processor()
     processor.stop()
     
-    # Cleanup: stop all proactive loops
     print("Stopping proactive loops...")
     orchestrator = get_orchestrator()
     for user_id in list(orchestrator.user_loops.keys()):
         orchestrator.stop_user_loop(user_id)
     
-    # Cleanup database connections
     print("Closing database connections...")
     await close_behavioral_store()
     
@@ -225,9 +434,11 @@ app = FastAPI(
     Goal integration + Intelligence + Memory + Proactive Agent Loop + 
     Real-time Processing + Advanced Causal Discovery + Multi-Agent Debate +
     Belief Network + Ethical Guardrails + Memory Consolidation +
-    Rich Onboarding + Empathy Calibration + Agency Preservation
+    Rich Onboarding + Empathy Calibration + Agency Preservation +
+    Reality Filter Engine + Personal Evidence Ladder + 
+    Disproven Hypothesis Archive + Human Operating Model
     """,
-    version="1.4.0",  # Added human-centered systems
+    version="2.0.0",  # Major version bump for RFE integration
     lifespan=lifespan,
 )
 
@@ -240,11 +451,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 @app.get("/")
 def read_root():
     """Health check with feature flags."""
-    # NEW: Check component health
     components = {
+        # Core systems
         "continuity_ledger": True,
         "behavioral_ingestion": bool(settings.supabase_url),
         "causal_inference": bool(settings.supabase_url),
@@ -259,41 +471,91 @@ def read_root():
         "belief_network": bool(settings.supabase_url),
         "ethical_guardrails": bool(settings.supabase_url),
         "memory_consolidation": bool(settings.supabase_url),
-        # NEW: Human-centered systems
         "rich_onboarding": bool(settings.supabase_url),
         "empathy_calibration": bool(settings.supabase_url),
-        "agency_preservation": bool(settings.supabase_url)
+        "agency_preservation": bool(settings.supabase_url),
+        # NEW: RFE v2.0 systems
+        "reality_filter_engine": bool(settings.supabase_url),
+        "personal_evidence_ladder": bool(settings.supabase_url),
+        "disproven_hypothesis_archive": bool(settings.supabase_url),
+        "human_operating_model": True,  # Local, no external dependency
+        "mechanistic_hypothesis_generation": bool(settings.openai_api_key)
     }
     
-    # Calculate system health
     enabled = sum(components.values())
     total = len(components)
     
     return {
         "message": "Spirit continuity ledger is running",
         "docs": "/docs",
-        "version": "1.4.0",
+        "version": "2.0.0",
         "system_health": f"{enabled}/{total} components enabled",
         "features": components,
         "status": "healthy" if enabled >= total * 0.7 else "degraded",
+        "new_in_v2": {
+            "rfe": "Reality Filter Engine - causal inference gateway",
+            "pel": "Personal Evidence Ladder - structured evidence grading",
+            "dha": "Disproven Hypothesis Archive - anti-pattern database",
+            "hom": "Human Operating Model - mechanistic behavior generation"
+        },
         "human_centered_systems": {
             "onboarding": "/v1/onboarding",
             "empathy_profile": "/v1/empathy/profile",
             "partnership_contract": "/v1/empathy/partnership-contract"
+        },
+        "rfe_endpoints": {
+            "evidence_grading": "/v1/rfe/evidence/grade",
+            "process_observation": "/v1/rfe/process",
+            "experiment_design": "/v1/rfe/experiments/design",
+            "mechanism_generation": "/v1/rfe/mechanisms/generate",
+            "archive_check": "/v1/rfe/archive/check"
         }
     }
+
 
 @app.get("/health")
 async def health_check():
     """Detailed health check with database connectivity."""
     db_status = await verify_database_connections()
     
+    # NEW: Check RFE system health
+    rfe_status = await _check_rfe_health()
+    
     return {
-        "status": "healthy" if db_status.get("sqlite") else "degraded",
-        "version": "1.4.0",
+        "status": "healthy" if db_status.get("sqlite") and rfe_status["operational"] else "degraded",
+        "version": "2.0.0",
         "databases": db_status,
+        "rfe_system": rfe_status,
         "timestamp": datetime.utcnow().isoformat()
     }
+
+
+async def _check_rfe_health() -> Dict[str, Any]:
+    """Check RFE subsystem health."""
+    store = get_behavioral_store()
+    if not store:
+        return {"operational": False, "reason": "no_database"}
+    
+    try:
+        # Check recent processing
+        five_min_ago = (datetime.utcnow() - timedelta(minutes=5)).isoformat()
+        recent = store.client.table('rfe_decision_log').select('*', count='exact').gte(
+            'processed_at', five_min_ago
+        ).execute()
+        
+        pending = store.client.table('behavioral_observations').select('*', count='exact').eq(
+            'rfe_processed', False
+        ).execute()
+        
+        return {
+            "operational": True,
+            "recent_decisions_5m": recent.count if hasattr(recent, 'count') else 0,
+            "pending_observations": pending.count if hasattr(pending, 'count') else 0,
+            "queue_healthy": (pending.count if hasattr(pending, 'count') else 0) < 100
+        }
+    except Exception as e:
+        return {"operational": False, "reason": str(e)}
+
 
 @app.get("/continuity")
 async def continuity():
@@ -306,67 +568,72 @@ async def continuity():
         oldest = await session.scalar(select(func.min(Execution.day)))
     return {"oldest_execution": oldest.isoformat() if oldest else None}
 
-# NEW: System metrics endpoint
+
 @app.get("/metrics")
 async def system_metrics():
     """Get current system metrics for monitoring."""
-    from spirit.db.supabase_client import get_behavioral_store
-    
     store = get_behavioral_store()
     metrics = {
         "pending_mao_debates": 0,
         "blocked_interventions_24h": 0,
         "consolidated_memories": 0,
         "active_proactive_loops": len(get_orchestrator().user_loops),
-        # NEW: Human-centered metrics
         "active_onboarding_sessions": 0,
         "completed_onboardings": 0,
-        "empathy_feedback_received_24h": 0
+        "empathy_feedback_received_24h": 0,
+        # NEW: RFE metrics
+        "rfe_pending_observations": 0,
+        "rfe_avg_evidence_level": 0,
+        "active_experiments": 0,
+        "disproven_hypotheses_archived": 0,
+        "mechanism_hypotheses_generated_24h": 0
     }
     
     if store and store.client:
         try:
-            # Pending MAO debates
+            # Existing metrics
             pending = store.client.table('intervention_recommendations').select(
                 '*', count='exact'
             ).eq('status', 'pending_debate').execute()
             metrics["pending_mao_debates"] = pending.count if hasattr(pending, 'count') else 0
             
-            # Blocked interventions (24h)
             day_ago = (datetime.utcnow() - timedelta(hours=24)).isoformat()
             blocked = store.client.table('blocked_interventions').select(
                 '*', count='exact'
             ).gte('blocked_at', day_ago).execute()
             metrics["blocked_interventions_24h"] = blocked.count if hasattr(blocked, 'count') else 0
             
-            # Consolidated memories
-            consolidated = store.client.table('episodic_memories').select(
+            # NEW: RFE metrics
+            pending_rfe = store.client.table('behavioral_observations').select(
                 '*', count='exact'
-            ).eq('consolidated', True).execute()
-            metrics["consolidated_memories"] = consolidated.count if hasattr(consolidated, 'count') else 0
+            ).eq('rfe_processed', False).execute()
+            metrics["rfe_pending_observations"] = pending_rfe.count if hasattr(pending_rfe, 'count') else 0
             
-            # NEW: Onboarding metrics
-            active_onboarding = store.client.table('onboarding_sessions').select(
-                '*', count='exact'
-            ).is_('completed_at', None).execute()
-            metrics["active_onboarding_sessions"] = active_onboarding.count if hasattr(active_onboarding, 'count') else 0
+            avg_level = store.client.table('evidence_grading').select(
+                'level'
+            ).gte('graded_at', day_ago).execute()
+            if avg_level.data:
+                metrics["rfe_avg_evidence_level"] = round(
+                    sum(r['level'] for r in avg_level.data) / len(avg_level.data), 2
+                )
             
-            completed_onboarding = store.client.table('belief_networks').select(
+            active_exp = store.client.table('experiments').select(
                 '*', count='exact'
-            ).not_.is_('onboarded_at', None).execute()
-            metrics["completed_onboardings"] = completed_onboarding.count if hasattr(completed_onboarding, 'count') else 0
+            ).in_('status', ['running', 'scheduled']).execute()
+            metrics["active_experiments"] = active_exp.count if hasattr(active_exp, 'count') else 0
             
-            empathy_feedback = store.client.table('empathy_feedback').select(
+            archived = store.client.table('disproven_hypotheses').select(
                 '*', count='exact'
-            ).gte('recorded_at', day_ago).execute()
-            metrics["empathy_feedback_received_24h"] = empathy_feedback.count if hasattr(empathy_feedback, 'count') else 0
+            ).execute()
+            metrics["disproven_hypotheses_archived"] = archived.count if hasattr(archived, 'count') else 0
             
         except Exception as e:
             metrics["error"] = str(e)
     
     return metrics
 
-# Existing routers (preserved)
+
+# Include all routers
 app.include_router(auth.router, prefix="/api", tags=["auth"])
 app.include_router(goals.router, prefix="/api", tags=["goals"])
 app.include_router(trajectory.router, prefix="/api", tags=["trajectory"])
@@ -375,36 +642,61 @@ app.include_router(anchors.router, prefix="/api", tags=["anchors"])
 app.include_router(calibrate.router, prefix="/api", tags=["calibrate"])
 app.include_router(debug_trace.router, prefix="/api", tags=["debug"])
 
-# NEW: Behavioral data ingestion
+# Behavioral data ingestion
 app.include_router(ingestion_router)
 
-# NEW: Causal inference
+# Causal inference
 app.include_router(causal_router)
 
-# NEW: Goal-behavior integration
+# Goal-behavior integration
 app.include_router(behavioral_goals_router)
 
-# NEW: Intelligence engine (LangGraph agent)
+# Intelligence engine (LangGraph agent)
 app.include_router(intelligence_router)
 
-# NEW: Memory system (episodic + collective)
+# Memory system
 app.include_router(memory_router)
 
-# NEW: Delivery system (notifications)
+# Delivery system
 app.include_router(delivery_router)
 
-# NEW: Proactive agent loop (autonomous predictions & interventions)
+# Proactive agent loop
 app.include_router(proactive_router)
 
-# NEW: Real-time processing + Advanced causal discovery
+# Real-time processing
 app.include_router(realtime_causal_router)
 
-# NEW: Belief Network API
+# Belief Network
 app.include_router(belief_router, prefix="/api/belief", tags=["belief"])
 
-# NEW: Ethical Guardrails API
+# Ethical Guardrails
 app.include_router(ethical_router, prefix="/api/ethical", tags=["ethical"])
 
-# NEW: Human-centered system APIs
+# Human-centered systems
 app.include_router(onboarding_router, prefix="/v1/onboarding", tags=["onboarding"])
 app.include_router(empathy_router, prefix="/v1/empathy", tags=["empathy"])
+
+# NEW: RFE endpoints
+app.include_router(rfe_router)
+
+
+# Helper for evidence grading dict conversion
+def _dict_to_grading(data: Dict) -> Any:
+    """Convert database dict to EvidenceGrading object."""
+    from spirit.evidence.core import EvidenceLevel, EvidenceGrading
+    from datetime import datetime
+    
+    return EvidenceGrading(
+        observation_id=data['observation_id'],
+        user_id=data['user_id'],
+        level=EvidenceLevel(data['level']),
+        confidence=data['confidence'],
+        grading_reason=data['grading_reason'],
+        graded_by=data['graded_by'],
+        graded_at=datetime.fromisoformat(data['graded_at'].replace('Z', '+00:00')),
+        level_metadata=data.get('level_metadata', {}),
+        upgraded_from=EvidenceLevel(data['upgraded_from']) if data.get('upgraded_from') else None,
+        upgrade_reason=data.get('upgrade_reason'),
+        validation_checks_passed=data.get('validation_checks_passed', []),
+        validation_checks_failed=data.get('validation_checks_failed', [])
+    )
