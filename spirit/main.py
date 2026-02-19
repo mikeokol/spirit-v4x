@@ -1,12 +1,12 @@
 """
-Spirit Behavioral Research Agent - Main Application v2.1
+Spirit Behavioral Research Agent - Main Application v2.2
 Continuity ledger + Behavioral research + Causal inference + Goal integration 
 + Intelligence + Memory + Proactive Agent Loop + Real-time Processing 
 + Advanced Causal Discovery + Multi-Agent Debate + Belief Network 
 + Ethical Guardrails + Memory Consolidation + Human-Centered Systems
 + Reality Filter Engine + Personal Evidence Ladder + Disproven Hypothesis Archive
 + Human Operating Model + Human Strategy Model + Layer Arbitration Engine
-+ Personal Narrative Model + Mechanistic Hypothesis Generation
++ Personal Narrative Model + Values Inference Module + Mechanistic Hypothesis Generation
 """
 
 import asyncio
@@ -36,18 +36,24 @@ from spirit.api.ethical import router as ethical_router
 from spirit.api.onboarding import router as onboarding_router
 from spirit.api.empathy import router as empathy_router
 
-# NEW: RFE and LAE API endpoints
+# RFE and LAE API endpoints
 from spirit.api.rfe import router as rfe_router
 from spirit.api.lae import router as lae_router
+
+# NEW: VIM API endpoint
+from spirit.api.vim import router as vim_router
 
 # Core systems
 from spirit.agents.proactive_loop import get_orchestrator
 from spirit.streaming.realtime_pipeline import get_stream_processor
 
-# NEW: Import cognition models for type hints and initialization
+# Cognition models
 from spirit.cognition.human_strategy_model import get_human_strategy_model
 from spirit.cognition.layer_arbitration_engine import get_layer_arbitration_engine
 from spirit.cognition.personal_narrative_model import get_personal_narrative_model
+
+# NEW: VIM
+from spirit.cognition.values_inference_module import get_values_inference_module
 
 
 # ============================================================================
@@ -328,7 +334,7 @@ async def mao_debate_processor():
 
 async def layer_arbitration_processor():
     """
-    NEW: Background task that processes observations through Layer Arbitration Engine.
+    Background task that processes observations through Layer Arbitration Engine.
     Determines whether behavior is controlled by HOM, HSM, or PNM.
     """
     from spirit.cognition.layer_arbitration_engine import get_layer_arbitration_engine
@@ -391,7 +397,7 @@ async def layer_arbitration_processor():
 
 async def narrative_model_updater():
     """
-    NEW: Background task that updates Personal Narrative Models based on observations.
+    Background task that updates Personal Narrative Models based on observations.
     """
     from spirit.cognition.personal_narrative_model import get_personal_narrative_model
     
@@ -427,16 +433,117 @@ async def narrative_model_updater():
             await asyncio.sleep(120)
 
 
+# NEW: VIM Background Processors
+async def values_inference_processor():
+    """
+    NEW: Background task that processes observations through VIM.
+    Detects sacrifice patterns, emotional gradients, and infers values.
+    """
+    vim = get_values_inference_module()
+    store = get_behavioral_store()
+    
+    if not store:
+        print("VIM processor: No Supabase, skipping")
+        return
+    
+    while True:
+        try:
+            # Process observations that have passed LAE
+            five_min_ago = (datetime.utcnow() - timedelta(minutes=5)).isoformat()
+            
+            pending = store.client.table('behavioral_observations').select('*').eq(
+                'vim_processed', False
+            ).eq('lae_processed', True).gte('timestamp', five_min_ago).limit(40).execute()
+            
+            if pending.data:
+                for obs in pending.data:
+                    # Process through VIM
+                    result = await vim.process_observation(obs, obs['user_id'])
+                    
+                    # Mark as processed
+                    store.client.table('behavioral_observations').update({
+                        'vim_processed': True,
+                        'sacrifices_detected': result['new_sacrifices_detected'],
+                        'values_inferred': len(result['current_value_profile'])
+                    }).eq('observation_id', obs['observation_id']).execute()
+                    
+                    print(f"VIM processed {obs['observation_id']}: "
+                          f"{result['new_sacrifices_detected']} sacrifices, "
+                          f"{result['dominant_values']}")
+            
+            await asyncio.sleep(20)
+            
+        except Exception as e:
+            print(f"VIM processor error: {e}")
+            await asyncio.sleep(60)
+
+
+async def recovery_pattern_processor():
+    """
+    NEW: Background task that analyzes post-disruption recovery patterns.
+    Identifies automatic restarts vs effortful restarts to infer values.
+    """
+    vim = get_values_inference_module()
+    store = get_behavioral_store()
+    
+    if not store:
+        return
+    
+    while True:
+        try:
+            # Get recent disruptions that haven't been analyzed
+            one_hour_ago = (datetime.utcnow() - timedelta(hours=1)).isoformat()
+            
+            disruptions = store.client.table('disruption_events').select('*').eq(
+                'recovery_analyzed', False
+            ).lt('disrupted_at', one_hour_ago).limit(20).execute()
+            
+            if disruptions.data:
+                for disruption in disruptions.data:
+                    user_id = disruption['user_id']
+                    
+                    # Get subsequent observations
+                    subsequent = store.client.table('behavioral_observations').select('*').eq(
+                        'user_id', user_id
+                    ).gt('timestamp', disruption['disrupted_at']).order('timestamp').limit(5).execute()
+                    
+                    if subsequent.data:
+                        # Process recovery pattern
+                        result = await vim.process_recovery_pattern(
+                            user_id,
+                            disruption,
+                            subsequent.data
+                        )
+                        
+                        # Mark as analyzed
+                        store.client.table('disruption_events').update({
+                            'recovery_analyzed': True,
+                            'inferred_value': result['inferred_value'],
+                            'automatic_restart': result['automatic_restart'],
+                            'recovery_confidence': result['confidence']
+                        }).eq('event_id', disruption['event_id']).execute()
+                        
+                        if result['inferred_value']:
+                            print(f"Recovery pattern for {user_id}: {result['inferred_value']} "
+                                  f"(auto={result['automatic_restart']}, conf={result['confidence']:.2f})")
+            
+            await asyncio.sleep(45)
+            
+        except Exception as e:
+            print(f"Recovery pattern processor error: {e}")
+            await asyncio.sleep(120)
+
+
 # ============================================================================
 # LIFESPAN MANAGEMENT
 # ============================================================================
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Manage application lifecycle with all new components."""
+    """Manage application lifecycle with all components including VIM."""
     
     print("=" * 70)
-    print("SPIRIT INITIALIZING v2.1")
+    print("SPIRIT INITIALIZING v2.2")
     print("=" * 70)
     
     db_status = await verify_database_connections()
@@ -486,23 +593,33 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(narrative_model_updater())
     print("✓ Personal Narrative Model updater started")
     
+    # NEW: VIM processors
+    asyncio.create_task(values_inference_processor())
+    print("✓ Values Inference Module processor started")
+    
+    asyncio.create_task(recovery_pattern_processor())
+    print("✓ Recovery pattern processor started")
+    
+    # Initialize cognition model singletons
     try:
         _ = get_human_strategy_model()
         print("✓ Human Strategy Model initialized")
         _ = get_layer_arbitration_engine()
         print("✓ Layer Arbitration Engine initialized")
+        _ = get_values_inference_module()
+        print("✓ Values Inference Module initialized")
     except Exception as e:
         print(f"⚠ Cognition model initialization warning: {e}")
     
     print("=" * 70)
-    print("SPIRIT v2.1 ONLINE")
+    print("SPIRIT v2.2 ONLINE")
     print("Features: MAO | Belief Network | Ethical Guardrails | Memory Consolidation")
-    print("NEW: RFE | PEL | DHA | HOM | HSM | LAE | PNM")
+    print("COGNITION: HOM | HSM | PNM | LAE | VIM")
     print("=" * 70)
     
     yield
     
-    print("\n" + "=" * 70)
+    print("\\n" + "=" * 70)
     print("SPIRIT SHUTTING DOWN")
     print("=" * 70)
     
@@ -534,9 +651,10 @@ app = FastAPI(
     Rich Onboarding + Empathy Calibration + Agency Preservation +
     Reality Filter Engine + Personal Evidence Ladder + 
     Disproven Hypothesis Archive + Human Operating Model +
-    Human Strategy Model + Layer Arbitration Engine + Personal Narrative Model
+    Human Strategy Model + Layer Arbitration Engine + Personal Narrative Model +
+    Values Inference Module
     """,
-    version="2.1.0",
+    version="2.2.0",
     lifespan=lifespan,
 )
 
@@ -582,6 +700,7 @@ def read_root():
         "human_strategy_model": True,
         "layer_arbitration_engine": bool(settings.supabase_url),
         "personal_narrative_model": bool(settings.supabase_url),
+        "values_inference_module": bool(settings.supabase_url),
     }
     
     enabled = sum(components.values())
@@ -590,7 +709,7 @@ def read_root():
     return {
         "message": "Spirit continuity ledger is running",
         "docs": "/docs",
-        "version": "2.1.0",
+        "version": "2.2.0",
         "system_health": f"{enabled}/{total} components enabled",
         "features": components,
         "status": "healthy" if enabled >= total * 0.7 else "degraded",
@@ -604,6 +723,12 @@ def read_root():
             "hsm": "Human Strategy Model - strategic optimization pressures",
             "lae": "Layer Arbitration Engine - HOM/HSM/PNM layer detection",
             "pnm": "Personal Narrative Model - identity and meaning systems"
+        },
+        "new_in_v2_2": {
+            "vim": "Values Inference Module - enforced preference detection",
+            "sacrifice_mapping": "Revealed preference through cost payment",
+            "recovery_analysis": "Automatic restart vs effortful restart detection",
+            "value_conflict_prediction": "Goal sabotage prediction from value conflicts"
         },
         "human_centered_systems": {
             "onboarding": "/v1/onboarding",
@@ -623,6 +748,17 @@ def read_root():
             "match_intervention": "/v1/lae/match-intervention",
             "signatures": "/v1/lae/signatures/{user_id}",
             "layer_history": "/v1/lae/layer-history/{user_id}"
+        },
+        "vim_endpoints": {
+            "process": "/v1/vim/process",
+            "recovery": "/v1/vim/recovery",
+            "profile": "/v1/vim/profile/{user_id}",
+            "experiment_design": "/v1/vim/experiment-design",
+            "intervention_framing": "/v1/vim/intervention-framing",
+            "conflict_check": "/v1/vim/conflict-check",
+            "sacrifices": "/v1/vim/sacrifices/{user_id}",
+            "return_vectors": "/v1/vim/return-vectors/{user_id}",
+            "tradeoffs": "/v1/vim/tradeoffs/{user_id}"
         }
     }
 
@@ -633,13 +769,15 @@ async def health_check():
     db_status = await verify_database_connections()
     rfe_status = await _check_rfe_health()
     lae_status = await _check_lae_health()
+    vim_status = await _check_vim_health()
     
     return {
         "status": "healthy" if db_status.get("sqlite") and rfe_status["operational"] else "degraded",
-        "version": "2.1.0",
+        "version": "2.2.0",
         "databases": db_status,
         "rfe_system": rfe_status,
         "lae_system": lae_status,
+        "vim_system": vim_status,
         "timestamp": datetime.utcnow().isoformat()
     }
 
@@ -709,6 +847,47 @@ async def _check_lae_health() -> Dict[str, Any]:
         return {"operational": False, "reason": str(e)}
 
 
+async def _check_vim_health() -> Dict[str, Any]:
+    """NEW: Check VIM subsystem health."""
+    store = get_behavioral_store()
+    if not store:
+        return {"operational": False, "reason": "no_database"}
+    
+    try:
+        five_min_ago = (datetime.utcnow() - timedelta(minutes=5)).isoformat()
+        
+        # Check recent VIM processing
+        recent = store.client.table('behavioral_observations').select('*', count='exact').eq(
+            'vim_processed', True
+        ).gte('timestamp', five_min_ago).execute()
+        
+        pending = store.client.table('behavioral_observations').select('*', count='exact').eq(
+            'vim_processed', False
+        ).eq('lae_processed', True).execute()
+        
+        # Get value inference stats
+        today = datetime.utcnow().strftime('%Y-%m-%d')
+        sacrifices = store.client.table('behavioral_observations').select('*', count='exact').gt(
+            'sacrifices_detected', 0
+        ).gte('timestamp', today).execute()
+        
+        # Get users with inferred values
+        users_with_values = store.client.table('behavioral_observations').select(
+            'user_id', count='exact'
+        ).gt('values_inferred', 0).gte('timestamp', today).execute()
+        
+        return {
+            "operational": True,
+            "recent_processed_5m": recent.count if hasattr(recent, 'count') else 0,
+            "pending_for_vim": pending.count if hasattr(pending, 'count') else 0,
+            "sacrifices_detected_today": sacrifices.count if hasattr(sacrifices, 'count') else 0,
+            "users_with_inferred_values": users_with_values.count if hasattr(users_with_values, 'count') else 0,
+            "queue_healthy": (pending.count if hasattr(pending, 'count') else 0) < 40
+        }
+    except Exception as e:
+        return {"operational": False, "reason": str(e)}
+
+
 @app.get("/continuity")
 async def continuity():
     from datetime import date
@@ -742,7 +921,13 @@ async def system_metrics():
         "lae_today_hom_dominant": 0,
         "lae_today_hsm_dominant": 0,
         "lae_today_pnm_dominant": 0,
-        "active_diagnostic_experiments": 0
+        "active_diagnostic_experiments": 0,
+        # NEW: VIM metrics
+        "vim_pending_processing": 0,
+        "vim_sacrifices_detected_24h": 0,
+        "vim_recovery_patterns_analyzed": 0,
+        "users_with_value_profiles": 0,
+        "value_conflicts_predicted": 0
     }
     
     if store and store.client:
@@ -750,6 +935,7 @@ async def system_metrics():
             day_ago = (datetime.utcnow() - timedelta(hours=24)).isoformat()
             today = datetime.utcnow().strftime('%Y-%m-%d')
             
+            # Existing metrics
             pending = store.client.table('intervention_recommendations').select(
                 '*', count='exact'
             ).eq('status', 'pending_debate').execute()
@@ -806,6 +992,27 @@ async def system_metrics():
             ).in_('status', ['running', 'pending']).execute()
             metrics["active_diagnostic_experiments"] = diag_exp.count if hasattr(diag_exp, 'count') else 0
             
+            # NEW: VIM metrics
+            pending_vim = store.client.table('behavioral_observations').select(
+                '*', count='exact'
+            ).eq('vim_processed', False).eq('lae_processed', True).execute()
+            metrics["vim_pending_processing"] = pending_vim.count if hasattr(pending_vim, 'count') else 0
+            
+            sacrifices_24h = store.client.table('behavioral_observations').select(
+                '*', count='exact'
+            ).gt('sacrifices_detected', 0).gte('timestamp', day_ago).execute()
+            metrics["vim_sacrifices_detected_24h"] = sacrifices_24h.count if hasattr(sacrifices_24h, 'count') else 0
+            
+            recovery_analyzed = store.client.table('disruption_events').select(
+                '*', count='exact'
+            ).eq('recovery_analyzed', True).gte('analyzed_at', day_ago).execute()
+            metrics["vim_recovery_patterns_analyzed"] = recovery_analyzed.count if hasattr(recovery_analyzed, 'count') else 0
+            
+            users_values = store.client.table('behavioral_observations').select(
+                'user_id', count='exact'
+            ).gt('values_inferred', 0).gte('timestamp', today).execute()
+            metrics["users_with_value_profiles"] = users_values.count if hasattr(users_values, 'count') else 0
+            
         except Exception as e:
             metrics["error"] = str(e)
     
@@ -841,6 +1048,9 @@ app.include_router(empathy_router, prefix="/v1/empathy", tags=["empathy"])
 app.include_router(rfe_router)
 app.include_router(lae_router)
 
+# NEW: VIM router
+app.include_router(vim_router)
+
 
 # ============================================================================
 # HELPERS
@@ -864,3 +1074,6 @@ def _dict_to_grading(data: Dict) -> Any:
         validation_checks_passed=data.get('validation_checks_passed', []),
         validation_checks_failed=data.get('validation_checks_failed', [])
     )
+'''
+
+print(f"Updated main.py created: {len(updated_main_py)} bytes")
