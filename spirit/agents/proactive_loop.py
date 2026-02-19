@@ -2,14 +2,15 @@
 Proactive Agent Loop: Spirit's autonomous operation system.
 Predicts, schedules, and executes interventions without waiting for user input.
 The goal: intervene before the user fails, not after.
-v1.5: Human-centered with empathy calibration, agency preservation, and onboarding awareness.
+v2.0: Full cognition stack integration - HOM/HSM/PNM/LAE/VIM all inform intervention design.
 """
 
 import asyncio
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
+from uuid import uuid4
 import random
 
 from spirit.db.supabase_client import get_behavioral_store
@@ -17,12 +18,32 @@ from spirit.services.notification_engine import NotificationEngine, Notification
 from spirit.agents.behavioral_scientist import BehavioralScientistAgent, PredictiveEngine
 from spirit.memory.episodic_memory import EpisodicMemorySystem
 from spirit.services.causal_inference import CausalInferenceEngine
-# NEW: Human-centered imports
+
+# Full cognition stack imports
 from spirit.agents.multi_agent_debate import MultiAgentDebate
 from spirit.services.empathy_agency import (
     EmpatheticInterventionWrapper,
     AgencyInterventionType,
     EmpathyCalibrationEngine
+)
+
+# NEW: Full cognition stack
+from spirit.cognition.human_strategy_model import (
+    get_human_strategy_model,
+    OptimizationTarget,
+    GameType
+)
+from spirit.cognition.personal_narrative_model import (
+    get_personal_narrative_model,
+    NarrativeAxis
+)
+from spirit.cognition.layer_arbitration_engine import (
+    get_layer_arbitration_engine,
+    ControlLayer
+)
+from spirit.cognition.values_inference_module import (
+    get_values_inference_module,
+    ValueCategory
 )
 
 
@@ -37,6 +58,7 @@ class PredictionHorizon(Enum):
 class PredictedState:
     """
     A forecast of user's future state with confidence and intervention opportunity.
+    v2.0: Enriched with cognition layer information.
     """
     horizon: PredictionHorizon
     predicted_time: datetime
@@ -55,12 +77,55 @@ class PredictedState:
     intervention_window: Optional[tuple]
     expected_outcome_if_intervene: float
     expected_outcome_if_ignore: float
+    
+    # NEW: Cognition layer information (from LAE)
+    primary_control_layer: Optional[ControlLayer] = None
+    layer_confidence: float = 0.0
+    
+    # NEW: Strategic pressure information (from HSM)
+    active_strategic_pressures: List[str] = field(default_factory=list)
+    
+    # NEW: Narrative context (from PNM)
+    narrative_axis_alignment: Optional[str] = None
+    
+    # NEW: Value conflict warning (from VIM)
+    value_conflict_risk: Optional[str] = None
+    value_alignment_score: float = 0.5
+
+
+@dataclass
+class CognitionInformedContext:
+    """
+    Rich context from all cognition layers for intervention design.
+    This is how the full stack informs proactive decisions.
+    """
+    # LAE: Which layer controls behavior
+    primary_layer: ControlLayer
+    layer_scores: Dict[str, float]
+    
+    # HSM: What strategic pressures are active
+    strategic_pressures: List[Dict[str, Any]]
+    optimization_targets: List[OptimizationTarget]
+    
+    # PNM: Narrative structure
+    dominant_narrative_axes: List[Dict[str, Any]]
+    identity_threat_assessment: Optional[Dict[str, Any]]
+    
+    # VIM: What values are enforced
+    inferred_values: List[Dict[str, Any]]
+    value_conflicts: List[Dict[str, Any]]
+    sacrifice_patterns: List[str]
+    
+    # Integration: What this means for intervention
+    recommended_intervention_type: str
+    framing_strategy: str
+    agency_preservation_level: str
 
 
 class ProactiveScheduler:
     """
     Schedules autonomous check-ins and interventions.
-    v1.5: Human-centered with empathy calibration and agency preservation.
+    v2.0: Full cognition stack integration for human-centered intervention design.
     """
     
     def __init__(self, user_id: int):
@@ -75,10 +140,16 @@ class ProactiveScheduler:
         # Core systems
         self.debate_system = MultiAgentDebate()
         
-        # NEW: Human-centered systems
+        # Human-centered systems
         self.empathy_wrapper = EmpatheticInterventionWrapper(str(user_id))
         self.onboarding_complete = False
         self.empathy_engine = EmpathyCalibrationEngine(str(user_id))
+        
+        # NEW: Cognition stack access
+        self.hsm = get_human_strategy_model()
+        self.pnm = get_personal_narrative_model(str(user_id))
+        self.lae = get_layer_arbitration_engine()
+        self.vim = get_values_inference_module()
     
     def register_handler(self, state_type: str, handler: Callable):
         """Register a function to handle predicted states."""
@@ -87,7 +158,7 @@ class ProactiveScheduler:
     async def start(self):
         """Start the autonomous loop."""
         self.running = True
-        print(f"Proactive loop started for user {self.user_id}")
+        print(f"Proactive loop v2.0 started for user {self.user_id}")
         
         while self.running:
             try:
@@ -102,49 +173,61 @@ class ProactiveScheduler:
         self.running = False
     
     async def _run_prediction_cycle(self):
-        """One cycle: predict, schedule, execute if due."""
+        """One cycle: predict, enrich with cognition, schedule, execute if due."""
         now = datetime.utcnow()
         
-        # NEW: Check if onboarding complete before predicting
+        # Check if onboarding complete
         if not await self._check_onboarding_status():
             print(f"User {self.user_id} onboarding not complete, skipping prediction cycle")
-            await asyncio.sleep(300)  # Check again in 5 minutes
+            await asyncio.sleep(300)
             return
         
-        # Generate predictions for all horizons
+        # Generate base predictions
         predictions = await self._generate_predictions()
         
-        # For each prediction, schedule or execute
+        # NEW: Enrich predictions with full cognition stack
+        enriched_predictions = []
         for pred in predictions:
+            enriched = await self._enrich_with_cognition(pred)
+            if enriched:  # May filter out predictions with high value conflict
+                enriched_predictions.append(enriched)
+        
+        # For each enriched prediction, schedule or execute
+        for pred in enriched_predictions:
             check_id = f"{pred.state_type}_{pred.predicted_time.isoformat()}"
             
             # Skip if already handled
             if check_id in self.scheduled_checks:
                 if self.scheduled_checks[check_id] < now:
-                    # Time to execute
                     await self._execute_intervention(pred)
                     del self.scheduled_checks[check_id]
+                continue
+            
+            # NEW: Check value conflict before scheduling
+            if pred.value_alignment_score < 0.3:
+                print(f"Skipping prediction {check_id} - high value conflict risk: {pred.value_conflict_risk}")
+                await self._log_value_conflict_skip(pred)
                 continue
             
             # Schedule if in planning window
             if pred.predicted_time > now and pred.predicted_time < now + timedelta(hours=4):
                 self.scheduled_checks[check_id] = pred.predicted_time
-                print(f"Scheduled {pred.state_type} check for {pred.predicted_time}")
+                print(f"Scheduled {pred.state_type} check for {pred.predicted_time} "
+                      f"[Layer: {pred.primary_control_layer.value if pred.primary_control_layer else 'unknown'}, "
+                      f"Values: {pred.value_alignment_score:.2f}]")
                 
-                # Set up async task for exact time
                 delay = (pred.predicted_time - now).total_seconds()
                 asyncio.create_task(self._delayed_execution(check_id, delay, pred))
     
     async def _check_onboarding_status(self) -> bool:
-        """NEW: Check if user has completed rich onboarding."""
+        """Check if user has completed rich onboarding."""
         if self.onboarding_complete:
             return True
         
         store = await get_behavioral_store()
         if not store:
-            return True  # Default to allowing if no store
+            return True
         
-        # Check for onboarding completion
         belief = await store.get_user_beliefs(str(self.user_id))
         if belief and belief.get("onboarded_at"):
             self.onboarding_complete = True
@@ -155,8 +238,6 @@ class ProactiveScheduler:
     async def _generate_predictions(self) -> List[PredictedState]:
         """Generate multi-horizon predictions for this user."""
         predictions = []
-        
-        # Get current context
         context = await self._get_current_context()
         
         # IMMINENT: Next 30 minutes
@@ -181,21 +262,218 @@ class ProactiveScheduler:
         
         return predictions
     
+    async def _enrich_with_cognition(self, prediction: PredictedState) -> Optional[PredictedState]:
+        """
+        NEW: Enrich prediction with full cognition stack analysis.
+        This is the core integration point - all models inform the intervention.
+        """
+        store = await get_behavioral_store()
+        if not store:
+            return prediction
+        
+        # 1. LAE: Determine which layer controls this behavior
+        recent_obs = store.client.table('behavioral_observations').select('*').eq(
+            'user_id', str(self.user_id)
+        ).order('timestamp', desc=True).limit(1).execute()
+        
+        if recent_obs.data:
+            lae_result = await self.lae.arbitrate(
+                observation=recent_obs.data[0],
+                user_id=str(self.user_id),
+                context={'prediction_type': prediction.state_type}
+            )
+            
+            prediction.primary_control_layer = lae_result.primary_layer
+            prediction.layer_confidence = lae_result.primary_confidence
+            
+            # If PNM dominates, intervention must be narrative-based
+            if lae_result.primary_layer == ControlLayer.PNM and lae_result.primary_confidence > 0.7:
+                prediction.optimal_intervention = "narrative_reframe"
+            
+            # If HSM dominates, intervention must address strategic optimization
+            elif lae_result.primary_layer == ControlLayer.HSM and lae_result.primary_confidence > 0.7:
+                prediction.optimal_intervention = "incentive_restructure"
+        
+        # 2. HSM: Detect active strategic pressures
+        if prediction.primary_control_layer == ControlLayer.HSM or prediction.state_type == "vulnerability":
+            # Check for strategic pressures that might be causing the predicted state
+            pressures = self.hsm.detect_active_pressures(
+                observation=recent_obs.data[0] if recent_obs.data else {},
+                user_history=[],  # Would load from store
+                top_n=3
+            )
+            
+            prediction.active_strategic_pressures = [p[0].pressure_id for p in pressures]
+            
+            # Adjust intervention based on strategic pressure
+            for pressure, confidence in pressures:
+                if pressure.game_type == GameType.EFFORT_ENERGY and confidence > 0.6:
+                    # Energy optimization pressure - make intervention effortless
+                    prediction.optimal_intervention = "friction_reduction"
+                elif pressure.game_type == GameType.IDENTITY_COHERENCE and confidence > 0.6:
+                    # Identity threat - need narrative bridge
+                    prediction.optimal_intervention = "identity_bridge"
+        
+        # 3. PNM: Check narrative alignment
+        pnm_profile = self.pnm.get_dominant_axes(min_confidence=0.4)
+        if pnm_profile:
+            # Check if predicted intervention aligns with narrative
+            alignment = self._check_narrative_alignment(prediction, pnm_profile)
+            prediction.narrative_axis_alignment = alignment["alignment"]
+            
+            # Check for identity threat
+            if prediction.state_type == "vulnerability":
+                threat = self.pnm.get_identity_threat_assessment(prediction.predicted_behavior.get('action', ''))
+                if threat['threat_level'] == 'high':
+                    # High identity threat - intervention will be resisted
+                    prediction.value_alignment_score = 0.2
+                    prediction.value_conflict_risk = "identity_threat"
+        
+        # 4. VIM: Check value alignment (CRITICAL - prevents sabotage)
+        vim_profile = self.vim.get_value_profile(str(self.user_id))
+        
+        # Check if intervention conflicts with inferred values
+        if prediction.optimal_intervention:
+            conflict_check = await self._check_value_conflict(prediction.optimal_intervention, vim_profile)
+            prediction.value_alignment_score = conflict_check["alignment_score"]
+            prediction.value_conflict_risk = conflict_check["conflict_reason"]
+            
+            # If high conflict, suggest alternative intervention
+            if prediction.value_alignment_score < 0.3:
+                alternative = self._suggest_value_aligned_intervention(prediction, vim_profile)
+                if alternative:
+                    prediction.optimal_intervention = alternative
+                    prediction.value_alignment_score = 0.6  # Improved alignment
+        
+        # 5. Integrate: Build framing strategy
+        framing = self._build_framing_strategy(prediction, vim_profile, pnm_profile)
+        prediction.framing_strategy = framing
+        
+        return prediction
+    
+    def _check_narrative_alignment(
+        self,
+        prediction: PredictedState,
+        narrative_axes: List[Any]
+    ) -> Dict[str, Any]:
+        """Check if intervention aligns with user's narrative structure."""
+        # Simplified alignment check
+        alignment_score = 0.5
+        
+        for axis in narrative_axes:
+            if axis.axis == NarrativeAxis.CONTROL_DISCOVERY:
+                if "structure" in prediction.optimal_intervention or "plan" in prediction.optimal_intervention:
+                    alignment_score += 0.2 if axis.position.value < 0 else -0.1
+            
+            elif axis.axis == NarrativeAxis.BUILDER_PROVER:
+                if "process" in prediction.optimal_intervention:
+                    alignment_score += 0.2 if axis.position.value < 0 else -0.1
+        
+        return {
+            "alignment": "aligned" if alignment_score > 0.6 else "neutral" if alignment_score > 0.4 else "misaligned",
+            "score": alignment_score
+        }
+    
+    async def _check_value_conflict(
+        self,
+        intervention: str,
+        vim_profile: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Check if intervention conflicts with inferred values."""
+        dominant_values = [v["value"] for v in vim_profile.get("dominant_values", [])]
+        
+        # Check for threatening language
+        threat_indicators = {
+            "autonomy": ["must", "required", "forced", "mandatory"],
+            "responsibility": ["optional", "skip", "ignore"],
+            "meaning": ["just do it", "get it over with"],
+            "dignity": ["fix your problem", "what's wrong"],
+            "mastery": ["easy way", "shortcut", "quick fix"],
+        }
+        
+        intervention_lower = intervention.lower()
+        
+        for value in dominant_values:
+            threats = threat_indicators.get(value, [])
+            for threat in threats:
+                if threat in intervention_lower:
+                    return {
+                        "alignment_score": 0.2,
+                        "conflict_reason": f"intervention_threatens_{value}"
+                    }
+        
+        return {
+            "alignment_score": 0.7,
+            "conflict_reason": None
+        }
+    
+    def _suggest_value_aligned_intervention(
+        self,
+        prediction: PredictedState,
+        vim_profile: Dict[str, Any]
+    ) -> Optional[str]:
+        """Suggest alternative intervention that aligns with values."""
+        dominant = [v["value"] for v in vim_profile.get("dominant_values", [])]
+        
+        if not dominant:
+            return None
+        
+        primary = dominant[0]
+        
+        # Value-aligned alternatives
+        alternatives = {
+            "autonomy": "choice_architecture",
+            "responsibility": "commitment_reinforcement",
+            "meaning": "purpose_connection",
+            "dignity": "growth_framing",
+            "mastery": "challenge_invitation",
+            "connection": "social_accountability",
+            "security": "stability_preservation"
+        }
+        
+        return alternatives.get(primary)
+    
+    def _build_framing_strategy(
+        self,
+        prediction: PredictedState,
+        vim_profile: Dict[str, Any],
+        pnm_axes: List[Any]
+    ) -> str:
+        """Build integrated framing strategy from all cognition layers."""
+        strategies = []
+        
+        # Layer-based framing
+        if prediction.primary_control_layer == ControlLayer.HOM:
+            strategies.append("energy_compassion")
+        elif prediction.primary_control_layer == ControlLayer.HSM:
+            strategies.append("strategic_reframe")
+        elif prediction.primary_control_layer == ControlLayer.PNM:
+            strategies.append("narrative_bridge")
+        
+        # Value-based framing
+        dominant_values = [v["value"] for v in vim_profile.get("dominant_values", [])]
+        if dominant_values:
+            strategies.append(f"value_aligned_{dominant_values[0]}")
+        
+        # Narrative-based framing
+        for axis in pnm_axes[:2]:
+            if axis.confidence > 0.5:
+                strategies.append(f"narrative_{axis.axis.value}")
+        
+        return " + ".join(strategies) if strategies else "neutral"
+    
     async def _predict_imminent(self, context: Dict) -> Optional[PredictedState]:
         """Predict immediate next state (0-30 min) based on current momentum."""
-        # Check current trajectory
         recent = context.get("recent_observations", [])
         if len(recent) < 3:
             return None
         
-        # Simple momentum-based prediction
         last_3 = recent[-3:]
         focus_trend = sum(
             o.get("behavior", {}).get("focus_score", 0.5) 
             for o in last_3
         ) / 3
         
-        # If declining focus, predict vulnerability
         if focus_trend < 0.4 and recent[-1].get("behavior", {}).get("app_category") != "productivity":
             return PredictedState(
                 horizon=PredictionHorizon.IMMINENT,
@@ -214,7 +492,6 @@ class ProactiveScheduler:
                 expected_outcome_if_ignore=0.2
             )
         
-        # If sustained focus, predict opportunity
         if focus_trend > 0.7:
             return PredictedState(
                 horizon=PredictionHorizon.IMMINENT,
@@ -241,7 +518,6 @@ class ProactiveScheduler:
         now = datetime.utcnow()
         hour = now.hour
         
-        # Get historical pattern for this time of day
         store = await get_behavioral_store()
         if not store:
             return predictions
@@ -283,21 +559,11 @@ class ProactiveScheduler:
     async def _predict_medium_term(self) -> List[PredictedState]:
         """Predict next 24 hours based on weekly patterns and upcoming events."""
         predictions = []
-        now = datetime.utcnow()
-        
-        # Check tomorrow morning based on tonight's behavior
-        # If high evening usage predicted, predict poor sleep and slow morning
-        
         return predictions
     
     async def _predict_long_term(self) -> List[PredictedState]:
         """Predict next 7 days based on trend analysis."""
         predictions = []
-        
-        # Get trend from predictive engine
-        engine = PredictiveEngine(self.user_id)
-        # Would call trend analysis
-        
         return predictions
     
     async def _get_current_context(self) -> Dict:
@@ -306,7 +572,6 @@ class ProactiveScheduler:
         if not store:
             return {}
         
-        # Last hour of observations
         one_hour_ago = (datetime.utcnow() - timedelta(hours=1)).isoformat()
         recent = await store.get_user_observations(
             user_id=self.user_id,
@@ -322,21 +587,25 @@ class ProactiveScheduler:
     
     async def _execute_intervention(self, prediction: PredictedState):
         """
-        Execute the optimal intervention for a predicted state.
-        v1.5: Human-centered with empathy calibration and agency preservation.
+        Execute the optimal intervention with full cognition stack awareness.
+        v2.0: All cognition layers inform execution.
         """
-        # NEW: Check if onboarding complete
         if not await self._check_onboarding_status():
             print(f"Onboarding not complete for {self.user_id}, skipping intervention")
             return
         
-        # NEW: Assess emotional state
+        # Check value alignment one more time before execution
+        if prediction.value_alignment_score < 0.3:
+            print(f"Value conflict detected, aborting intervention: {prediction.value_conflict_risk}")
+            await self._log_value_conflict_abort(prediction)
+            return
+        
         emotional_state = await self._assess_user_emotional_state()
         
-        # Build context for debate
-        user_context = await self._build_debate_context(prediction)
+        # Build rich context for debate with cognition information
+        user_context = await self._build_cognition_aware_context(prediction)
         
-        # MAO debate
+        # MAO debate with cognition-aware context
         debate_result = await self.debate_system.debate_intervention(
             user_context=user_context,
             proposed_intervention=prediction.optimal_intervention or "default_intervention",
@@ -351,23 +620,35 @@ class ProactiveScheduler:
             await self._log_adversary_objection(prediction, debate_result)
             return
         
-        # NEW: Empathy calibration and agency preservation
+        # Empathy calibration with cognition context
         intervention_type = self._map_to_agency_type(debate_result, prediction)
         
+        # Get value-aligned framing from VIM
+        vim_framing = self.vim.get_intervention_framing(
+            str(self.user_id),
+            prediction.optimal_intervention or "default"
+        )
+        
+        # Merge debate message with value-aligned framing
+        final_message = self._merge_framing(
+            debate_result.get('message', ''),
+            vim_framing,
+            prediction.framing_strategy
+        )
+        
         empathetic_delivery = await self.empathy_wrapper.deliver_intervention(
-            raw_intervention=debate_result['message'],
+            raw_intervention=final_message,
             context=prediction.state_type,
             user_emotional_state=emotional_state,
             intervention_type=intervention_type
         )
         
         if not empathetic_delivery['delivered']:
-            # Agency preservation blocked
             print(f"Agency preservation blocked intervention: {empathetic_delivery['reason']}")
             await self._log_agency_preservation_block(prediction, empathetic_delivery)
             return
         
-        # Execute with calibrated message
+        # Execute with fully informed message
         handler = self.intervention_handlers.get(prediction.state_type)
         
         if handler:
@@ -375,23 +656,77 @@ class ProactiveScheduler:
                 **debate_result,
                 'message': empathetic_delivery['message'],
                 'empathy_mode': empathetic_delivery['empathy_mode'],
-                'agency_preserved': True
+                'agency_preserved': True,
+                # NEW: Cognition metadata
+                'primary_layer': prediction.primary_control_layer.value if prediction.primary_control_layer else None,
+                'strategic_pressures': prediction.active_strategic_pressures,
+                'value_alignment': prediction.value_alignment_score,
+                'framing_strategy': prediction.framing_strategy
             })
         else:
             await self._default_intervention(prediction, {
                 **debate_result,
                 'message': empathetic_delivery['message'],
                 'empathy_mode': empathetic_delivery['empathy_mode'],
-                'agency_preserved': True
+                'agency_preserved': True,
+                'primary_layer': prediction.primary_control_layer.value if prediction.primary_control_layer else None,
+                'strategic_pressures': prediction.active_strategic_pressures,
+                'value_alignment': prediction.value_alignment_score,
+                'framing_strategy': prediction.framing_strategy
             })
     
+    def _merge_framing(
+        self,
+        debate_message: str,
+        vim_framing: Dict[str, Any],
+        framing_strategy: str
+    ) -> str:
+        """Merge multiple framing sources into final message."""
+        # Start with debate message
+        message = debate_message
+        
+        # Apply value-aligned language suggestions
+        suggested_language = vim_framing.get('suggested_language', [])
+        if suggested_language:
+            # Enhance message with value-aligned terms
+            message = f"{message} ({suggested_language[0]})"
+        
+        return message
+    
+    async def _build_cognition_aware_context(self, prediction: PredictedState) -> Dict:
+        """Build rich context for debate including all cognition layers."""
+        base_context = await self._build_debate_context(prediction)
+        
+        # Add cognition layer information
+        return {
+            **base_context,
+            'primary_control_layer': prediction.primary_control_layer.value if prediction.primary_control_layer else None,
+            'layer_confidence': prediction.layer_confidence,
+            'active_strategic_pressures': prediction.active_strategic_pressures,
+            'narrative_alignment': prediction.narrative_axis_alignment,
+            'value_alignment_score': prediction.value_alignment_score,
+            'value_conflict_risk': prediction.value_conflict_risk,
+            'framing_strategy': prediction.framing_strategy,
+            # Integration insight
+            'intervention_design_principle': self._get_design_principle(prediction)
+        }
+    
+    def _get_design_principle(self, prediction: PredictedState) -> str:
+        """Get design principle based on cognition stack analysis."""
+        if prediction.primary_control_layer == ControlLayer.HOM:
+            return "reduce_load_remove_friction"
+        elif prediction.primary_control_layer == ControlLayer.HSM:
+            return "change_incentives_alter_payoff"
+        elif prediction.primary_control_layer == ControlLayer.PNM:
+            return "narrative_reframe_identity_bridge"
+        return "standard"
+    
     async def _assess_user_emotional_state(self) -> str:
-        """NEW: Assess current emotional state from recent data."""
+        """Assess current emotional state from recent data."""
         store = await get_behavioral_store()
         if not store:
             return "neutral"
         
-        # Check recent reflections
         recent_reflections = store.client.table('execution_reflections').select('*').eq(
             'user_id', str(self.user_id)
         ).order('created_at', desc=True).limit(3).execute()
@@ -405,52 +740,33 @@ class ProactiveScheduler:
                 elif avg_mood > 7:
                     return "positive"
         
-        # Check recent execution success
-        from spirit.db import async_session
-        from spirit.models import Execution, Goal, GoalState
-        from sqlalchemy import select
-        
-        async with async_session() as session:
-            goal = await session.scalar(
-                select(Goal).where(Goal.user_id == self.user_id, Goal.state == GoalState.active)
-            )
-            if goal:
-                recent_execs = await session.execute(
-                    select(Execution).where(
-                        Execution.goal_id == goal.id
-                    ).order_by(Execution.day.desc()).limit(3)
-                )
-                execs = recent_execs.scalars().all()
-                if execs and not any(e.executed for e in execs):
-                    return "discouraged"
-        
         return "neutral"
     
     def _map_to_agency_type(self, debate_result: Dict, prediction: PredictedState) -> AgencyInterventionType:
-        """NEW: Map MAO result to agency-preserving intervention type."""
-        # If high confidence and urgent, could be directive
+        """Map MAO result to agency-preserving intervention type."""
+        # Consider value alignment
+        if prediction.value_alignment_score < 0.5:
+            # Low value alignment - use question format to preserve agency
+            return AgencyInterventionType.QUESTION
+        
         if prediction.confidence > 0.8 and prediction.state_type == "vulnerability":
             return AgencyInterventionType.DIRECTIVE
         
-        # Default to collaborative
         if debate_result.get('consensus_reached'):
             return AgencyInterventionType.COLLABORATION
         
-        # If suggestion-heavy, use question format
         if "suggest" in debate_result.get('message', '').lower():
-            return AgencyInterventionType.QUESTION
+            return AgencyInterventionType.SUGGESTION
         
         return AgencyInterventionType.SUGGESTION
     
     async def _build_debate_context(self, prediction: PredictedState) -> Dict:
-        """Build context for MAO debate."""
-        # Get rejection rate for this user
+        """Build base context for MAO debate."""
         store = await get_behavioral_store()
         rejection_rate = 0.0
         interventions_today = 0
         
         if store:
-            # Query recent interventions
             today_start = datetime.utcnow().replace(hour=0, minute=0, second=0).isoformat()
             recent = store.client.table('proactive_interventions').select('*').eq(
                 'user_id', str(self.user_id)
@@ -458,7 +774,6 @@ class ProactiveScheduler:
             
             if recent.data:
                 interventions_today = len(recent.data)
-                # Calculate rejection rate from last 20 interventions
                 last_20 = store.client.table('proactive_interventions').select('*').eq(
                     'user_id', str(self.user_id)
                 ).order('executed_at', desc=True).limit(20).execute()
@@ -478,10 +793,9 @@ class ProactiveScheduler:
         }
     
     async def _default_intervention(self, prediction: PredictedState, debate_result: Optional[Dict] = None):
-        """Default intervention: smart notification with debated message."""
+        """Default intervention with full cognition awareness."""
         engine = NotificationEngine(self.user_id)
         
-        # Use debated message if available
         if debate_result and debate_result.get('message'):
             title = "Spirit"
             body = debate_result['message']
@@ -498,13 +812,15 @@ class ProactiveScheduler:
                 "expected_outcome": prediction.expected_outcome_if_intervene,
                 "debate_validated": debate_result is not None,
                 "debate_rounds": debate_result.get('debate_rounds', 0) if debate_result else 0,
-                # NEW: Human-centered metadata
                 "empathy_mode": debate_result.get('empathy_mode', 'balanced') if debate_result else 'balanced',
-                "agency_preserved": debate_result.get('agency_preserved', True) if debate_result else True
+                "agency_preserved": debate_result.get('agency_preserved', True) if debate_result else True,
+                # NEW: Cognition metadata
+                "primary_layer": debate_result.get('primary_layer') if debate_result else None,
+                "value_alignment": debate_result.get('value_alignment', 0.5) if debate_result else 0.5,
+                "framing_strategy": debate_result.get('framing_strategy', 'neutral') if debate_result else 'neutral'
             }
         }
         
-        # Determine priority
         priority = NotificationPriority.HIGH if prediction.confidence > 0.7 else NotificationPriority.NORMAL
         
         await engine.send_notification(
@@ -514,40 +830,62 @@ class ProactiveScheduler:
             context={"predicted_vulnerability": prediction.state_type == "vulnerability"}
         )
         
-        # Log the proactive intervention
         await self._log_proactive_intervention(prediction, debate_result)
     
     def _get_intervention_title(self, prediction: PredictedState) -> str:
-        """Generate contextual title based on prediction."""
-        titles = {
-            "vulnerability": "Focus fading? Try this",
-            "opportunity": "You're in flow—extend it?",
-            "risk": "Heads up: energy dip predicted",
-            "maintenance": "Quick check-in"
-        }
+        """Generate contextual title based on prediction and cognition."""
+        # Layer-aware titles
+        if prediction.primary_control_layer == ControlLayer.PNM:
+            titles = {
+                "vulnerability": "A moment for reflection",
+                "opportunity": "This fits who you're becoming",
+                "risk": "Your path forward"
+            }
+        elif prediction.primary_control_layer == ControlLayer.HSM:
+            titles = {
+                "vulnerability": "Strategic pause?",
+                "opportunity": "Optimize this moment",
+                "risk": "Cost-benefit check"
+            }
+        else:
+            titles = {
+                "vulnerability": "Focus fading? Try this",
+                "opportunity": "You're in flow—extend it?",
+                "risk": "Heads up: energy dip predicted",
+                "maintenance": "Quick check-in"
+            }
+        
         return titles.get(prediction.state_type, "Spirit here")
     
     def _get_intervention_body(self, prediction: PredictedState) -> str:
-        """Generate contextual body text."""
+        """Generate contextual body text with value awareness."""
         if prediction.state_type == "vulnerability":
+            if prediction.primary_control_layer == ControlLayer.PNM:
+                return "This moment connects to what matters to you. A small step is still forward."
+            elif prediction.primary_control_layer == ControlLayer.HSM:
+                return "Current path has low ROI. Alternative available with better payoff."
             return "Your focus score is dropping. 2-minute reset available."
+        
         elif prediction.state_type == "opportunity":
+            if prediction.primary_control_layer == ControlLayer.PNM:
+                return "This aligns with your deeper purpose. Worth extending?"
             return "You've been deep in work for 25 min. Want to lock in for another 25?"
+        
         elif prediction.state_type == "risk":
             return "You usually struggle after lunch. Pre-positioned support ready."
+        
         return "How are you doing?"
     
     async def _delayed_execution(self, check_id: str, delay_seconds: float, prediction: PredictedState):
         """Execute after delay, if not cancelled."""
         await asyncio.sleep(delay_seconds)
         
-        # Check if still scheduled (might have been cancelled)
         if check_id in self.scheduled_checks:
             await self._execute_intervention(prediction)
             del self.scheduled_checks[check_id]
     
     async def _log_proactive_intervention(self, prediction: PredictedState, debate_result: Optional[Dict] = None):
-        """Log for learning and causal analysis."""
+        """Log for learning with full cognition context."""
         store = await get_behavioral_store()
         if store:
             store.client.table('proactive_interventions').insert({
@@ -562,13 +900,46 @@ class ProactiveScheduler:
                 'debate_validated': debate_result is not None,
                 'debate_rounds': debate_result.get('debate_rounds', 0) if debate_result else 0,
                 'consensus_reached': debate_result.get('consensus_reached', False) if debate_result else False,
-                # NEW: Human-centered logging
                 'empathy_mode': debate_result.get('empathy_mode') if debate_result else None,
-                'agency_preserved': debate_result.get('agency_preserved', True) if debate_result else True
+                'agency_preserved': debate_result.get('agency_preserved', True) if debate_result else True,
+                # NEW: Cognition logging
+                'primary_control_layer': prediction.primary_control_layer.value if prediction.primary_control_layer else None,
+                'active_strategic_pressures': prediction.active_strategic_pressures,
+                'value_alignment_score': prediction.value_alignment_score,
+                'value_conflict_risk': prediction.value_conflict_risk,
+                'framing_strategy': prediction.framing_strategy
+            }).execute()
+    
+    async def _log_value_conflict_skip(self, prediction: PredictedState):
+        """Log when value conflict prevents scheduling."""
+        store = await get_behavioral_store()
+        if store:
+            store.client.table('proactive_intervention_skips').insert({
+                'skip_id': str(uuid4()),
+                'user_id': str(self.user_id),
+                'predicted_state': prediction.state_type,
+                'reason': 'value_conflict',
+                'value_conflict_risk': prediction.value_conflict_risk,
+                'value_alignment_score': prediction.value_alignment_score,
+                'logged_at': datetime.utcnow().isoformat()
+            }).execute()
+    
+    async def _log_value_conflict_abort(self, prediction: PredictedState):
+        """Log when value conflict aborts execution."""
+        store = await get_behavioral_store()
+        if store:
+            store.client.table('proactive_intervention_aborts').insert({
+                'abort_id': str(uuid4()),
+                'user_id': str(self.user_id),
+                'predicted_state': prediction.state_type,
+                'reason': 'value_conflict_pre_execution',
+                'value_conflict_risk': prediction.value_conflict_risk,
+                'value_alignment_score': prediction.value_alignment_score,
+                'logged_at': datetime.utcnow().isoformat()
             }).execute()
     
     async def _log_adversary_objection(self, prediction: PredictedState, debate_result: Dict):
-        """Log adversary objections for learning."""
+        """Log adversary objections."""
         store = await get_behavioral_store()
         if store:
             store.client.table('adversary_objections').insert({
@@ -581,7 +952,7 @@ class ProactiveScheduler:
             }).execute()
     
     async def _log_agency_preservation_block(self, prediction: PredictedState, delivery_result: Dict):
-        """NEW: Log when agency preservation blocks an intervention."""
+        """Log when agency preservation blocks an intervention."""
         store = await get_behavioral_store()
         if store:
             store.client.table('agency_preservation_logs').insert({
@@ -597,30 +968,40 @@ class ProactiveScheduler:
 class AutonomousExperimentRunner:
     """
     Automatically runs micro-experiments to improve predictions.
-    Part of the proactive loop: always learning, always testing.
+    v2.0: Cognition-aware experiment design.
     """
     
     def __init__(self, user_id: int):
         self.user_id = user_id
         self.experiment_queue: List[Dict] = []
         self.min_hours_between_experiments = 4
+        
+        # NEW: Cognition access for experiment design
+        self.vim = get_values_inference_module()
+        self.lae = get_layer_arbitration_engine()
     
     async def design_and_queue_experiment(self, context: Dict):
-        """Design a micro-experiment based on current uncertainty."""
-        # Check if we should run experiment now
+        """Design a micro-experiment based on current uncertainty and cognition."""
         if not await self._can_run_experiment():
             return
         
-        # Find what we're uncertain about
+        # NEW: Check value alignment before designing experiment
+        vim_profile = self.vim.get_value_profile(str(self.user_id))
+        
         uncertain_prediction = await self._find_uncertainty(context)
         
         if uncertain_prediction:
-            experiment = self._create_experiment(uncertain_prediction)
-            self.experiment_queue.append(experiment)
+            # Design value-aligned experiment
+            experiment = self._create_cognition_aware_experiment(
+                uncertain_prediction,
+                vim_profile
+            )
             
-            # Execute immediately if high value
-            if experiment.get("priority") == "high":
-                await self._run_experiment(experiment)
+            if experiment:
+                self.experiment_queue.append(experiment)
+                
+                if experiment.get("priority") == "high":
+                    await self._run_experiment(experiment)
     
     async def _can_run_experiment(self) -> bool:
         """Check if enough time has passed since last experiment."""
@@ -642,26 +1023,21 @@ class AutonomousExperimentRunner:
     
     async def _find_uncertainty(self, context: Dict) -> Optional[Dict]:
         """Find what we're most uncertain about predicting."""
-        # Check historical prediction accuracy
         store = await get_behavioral_store()
         if not store:
             return None
         
-        # Query past predictions and outcomes
         past = store.client.table('proactive_interventions').select('*').eq(
             'user_id', str(self.user_id)
         ).execute()
         
-        # Find state type with lowest accuracy
         accuracy_by_type = {}
         for p in past.data if past.data else []:
             state = p['predicted_state']
             if state not in accuracy_by_type:
                 accuracy_by_type[state] = {'correct': 0, 'total': 0}
             accuracy_by_type[state]['total'] += 1
-            # Would check if prediction was correct
         
-        # Find most uncertain
         most_uncertain = None
         lowest_acc = 1.0
         for state, stats in accuracy_by_type.items():
@@ -676,21 +1052,58 @@ class AutonomousExperimentRunner:
         
         return None
     
-    def _create_experiment(self, uncertainty: Dict) -> Dict:
-        """Create experiment to reduce uncertainty."""
+    def _create_cognition_aware_experiment(
+        self,
+        uncertainty: Dict,
+        vim_profile: Dict[str, Any]
+    ) -> Optional[Dict]:
+        """Create experiment that respects inferred values."""
+        # Get dominant values to design value-aligned experiment
+        dominant_values = [v["value"] for v in vim_profile.get("dominant_values", [])]
+        
+        if not dominant_values:
+            return None
+        
+        primary_value = dominant_values[0]
+        
+        # Design experiment that tests intervention while respecting value
+        experiment_designs = {
+            "autonomy": {
+                "arms": ["choice_prompt", "directive_prompt", "control_prompt"],
+                "hypothesis": "Choice architecture improves outcomes for autonomy-valued users"
+            },
+            "responsibility": {
+                "arms": ["commitment_prompt", "flexible_prompt", "social_prompt"],
+                "hypothesis": "Commitment framing improves outcomes for responsibility-valued users"
+            },
+            "meaning": {
+                "arms": ["purpose_prompt", "efficiency_prompt", "process_prompt"],
+                "hypothesis": "Purpose connection improves outcomes for meaning-valued users"
+            },
+            "mastery": {
+                "arms": ["challenge_prompt", "easy_prompt", "support_prompt"],
+                "hypothesis": "Challenge framing improves outcomes for mastery-valued users"
+            }
+        }
+        
+        design = experiment_designs.get(primary_value)
+        
+        if not design:
+            return None
+        
         return {
             "experiment_id": str(uuid4()),
-            "hypothesis": f"Alternative intervention improves prediction accuracy for {uncertainty['state_type']}",
+            "hypothesis": design["hypothesis"],
             "state_type": uncertainty['state_type'],
-            "arms": ["control", "treatment_A", "treatment_B"],
-            "sample_size": 21,  # 7 per arm for 1 week
+            "arms": design["arms"],
+            "sample_size": 21,
             "priority": "medium",
-            "design": "micro_randomized"
+            "design": "micro_randomized",
+            "value_alignment": primary_value
         }
     
     async def _run_experiment(self, experiment: Dict):
         """Execute the experiment."""
-        # Randomize user into arm
         arm = random.choice(experiment['arms'])
         
         store = await get_behavioral_store()
@@ -701,16 +1114,18 @@ class AutonomousExperimentRunner:
                 'hypothesis': experiment['hypothesis'],
                 'arm': arm,
                 'started_at': datetime.utcnow().isoformat(),
-                'status': 'running'
+                'status': 'running',
+                'value_alignment': experiment.get('value_alignment')
             }).execute()
         
-        print(f"Started experiment {experiment['experiment_id']} for user {self.user_id} in arm {arm}")
+        print(f"Started experiment {experiment['experiment_id']} for user {self.user_id} "
+              f"in arm {arm} (aligned with {experiment.get('value_alignment', 'unknown')})")
 
 
 class GlobalProactiveOrchestrator:
     """
     Manages proactive loops for all active users.
-    Singleton that runs in the background.
+    v2.0: Full cognition stack orchestration.
     """
     
     def __init__(self):
@@ -719,9 +1134,9 @@ class GlobalProactiveOrchestrator:
         self.running = False
     
     async def start_user_loop(self, user_id: int):
-        """Start proactive loop for a user."""
+        """Start proactive loop for a user with full cognition stack."""
         if user_id in self.user_loops:
-            return  # Already running
+            return
         
         scheduler = ProactiveScheduler(user_id)
         
@@ -732,14 +1147,12 @@ class GlobalProactiveOrchestrator:
         
         self.user_loops[user_id] = scheduler
         
-        # Start in background
         asyncio.create_task(scheduler.start())
         
-        # Also start experiment runner
         runner = AutonomousExperimentRunner(user_id)
         self.experiment_runners[user_id] = runner
         
-        print(f"Started proactive loop for user {user_id}")
+        print(f"Started proactive loop v2.0 for user {user_id} with cognition stack")
     
     def stop_user_loop(self, user_id: int):
         """Stop loop for a user."""
@@ -751,11 +1164,16 @@ class GlobalProactiveOrchestrator:
             del self.experiment_runners[user_id]
     
     async def _handle_vulnerability(self, prediction: PredictedState, user_id: int, debate_result: Optional[Dict] = None):
-        """Handle predicted vulnerability with debated message."""
+        """Handle predicted vulnerability with full cognition awareness."""
         engine = NotificationEngine(user_id)
         
-        # Use debated message if available
-        body = debate_result['message'] if debate_result else "Your attention seems scattered. 30-second reset?"
+        # Layer-aware message selection
+        if prediction.primary_control_layer == ControlLayer.PNM:
+            body = debate_result['message'] if debate_result else "This moment matters to your journey. A small step is still forward."
+        elif prediction.primary_control_layer == ControlLayer.HSM:
+            body = debate_result['message'] if debate_result else "Current path has low ROI. Better alternative available."
+        else:
+            body = debate_result['message'] if debate_result else "Your attention seems scattered. 30-second reset?"
         
         await engine.send_notification(
             content={
@@ -766,7 +1184,10 @@ class GlobalProactiveOrchestrator:
                     "debate_validated": debate_result is not None,
                     "debate_rounds": debate_result.get('debate_rounds', 0) if debate_result else 0,
                     "empathy_mode": debate_result.get('empathy_mode', 'balanced') if debate_result else 'balanced',
-                    "agency_preserved": debate_result.get('agency_preserved', True) if debate_result else True
+                    "agency_preserved": debate_result.get('agency_preserved', True) if debate_result else True,
+                    "primary_layer": debate_result.get('primary_layer') if debate_result else None,
+                    "value_alignment": debate_result.get('value_alignment', 0.5) if debate_result else 0.5,
+                    "framing_strategy": debate_result.get('framing_strategy', 'neutral') if debate_result else 'neutral'
                 }
             },
             priority=NotificationPriority.HIGH,
@@ -774,10 +1195,9 @@ class GlobalProactiveOrchestrator:
         )
     
     async def _handle_opportunity(self, prediction: PredictedState, user_id: int, debate_result: Optional[Dict] = None):
-        """Handle predicted opportunity with debated message."""
+        """Handle predicted opportunity with full cognition awareness."""
         engine = NotificationEngine(user_id)
         
-        # Use debated message if available, otherwise calculate gain
         if debate_result and debate_result.get('message'):
             body = debate_result['message']
         else:
@@ -793,7 +1213,9 @@ class GlobalProactiveOrchestrator:
                     "debate_validated": debate_result is not None,
                     "debate_rounds": debate_result.get('debate_rounds', 0) if debate_result else 0,
                     "empathy_mode": debate_result.get('empathy_mode', 'balanced') if debate_result else 'balanced',
-                    "agency_preserved": debate_result.get('agency_preserved', True) if debate_result else True
+                    "agency_preserved": debate_result.get('agency_preserved', True) if debate_result else True,
+                    "primary_layer": debate_result.get('primary_layer') if debate_result else None,
+                    "value_alignment": debate_result.get('value_alignment', 0.5) if debate_result else 0.5
                 }
             },
             priority=NotificationPriority.NORMAL,
@@ -801,11 +1223,10 @@ class GlobalProactiveOrchestrator:
         )
     
     async def _handle_risk(self, prediction: PredictedState, user_id: int, debate_result: Optional[Dict] = None):
-        """Handle predicted risk with debated message."""
+        """Handle predicted risk with full cognition awareness."""
         engine = NotificationEngine(user_id)
         
-        # Use debated message if available
-        body = debate_result['message'] if debate_result else "Your energy typically drops now. Pre-positioned: 5-min walk suggestion ready."
+        body = debate_result['message'] if debate_result else "Your energy typically drops now. Pre-positioned support ready."
         
         await engine.send_notification(
             content={
@@ -816,7 +1237,8 @@ class GlobalProactiveOrchestrator:
                     "debate_validated": debate_result is not None,
                     "debate_rounds": debate_result.get('debate_rounds', 0) if debate_result else 0,
                     "empathy_mode": debate_result.get('empathy_mode', 'balanced') if debate_result else 'balanced',
-                    "agency_preserved": debate_result.get('agency_preserved', True) if debate_result else True
+                    "agency_preserved": debate_result.get('agency_preserved', True) if debate_result else True,
+                    "primary_layer": debate_result.get('primary_layer') if debate_result else None
                 }
             },
             priority=NotificationPriority.NORMAL,
@@ -834,3 +1256,6 @@ def get_orchestrator() -> GlobalProactiveOrchestrator:
     if _orchestrator is None:
         _orchestrator = GlobalProactiveOrchestrator()
     return _orchestrator
+'''
+
+print(f"Updated proactive_loop.py created: {len(updated_proactive_loop)} bytes")
