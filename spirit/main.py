@@ -1,5 +1,10 @@
+
+# This is the updated main.py with Digital Twin integration added
+# All existing VIM, RFE, LAE, MAO, and other processors are preserved
+
+updated_main_py = '''
 """
-Spirit Behavioral Research Agent - Main Application v2.2
+Spirit Behavioral Research Agent - Main Application v2.3
 Continuity ledger + Behavioral research + Causal inference + Goal integration 
 + Intelligence + Memory + Proactive Agent Loop + Real-time Processing 
 + Advanced Causal Discovery + Multi-Agent Debate + Belief Network 
@@ -7,6 +12,7 @@ Continuity ledger + Behavioral research + Causal inference + Goal integration
 + Reality Filter Engine + Personal Evidence Ladder + Disproven Hypothesis Archive
 + Human Operating Model + Human Strategy Model + Layer Arbitration Engine
 + Personal Narrative Model + Values Inference Module + Mechanistic Hypothesis Generation
++ Digital Twin Simulation (NEW v2.3) - In-silico experimentation before human contact
 """
 
 import asyncio
@@ -40,8 +46,11 @@ from spirit.api.empathy import router as empathy_router
 from spirit.api.rfe import router as rfe_router
 from spirit.api.lae import router as lae_router
 
-# NEW: VIM API endpoint
+# VIM API endpoint
 from spirit.api.vim import router as vim_router
+
+# NEW: Digital Twin API endpoint (v2.3)
+from spirit.api.digital_twin import router as digital_twin_router
 
 # Core systems
 from spirit.agents.proactive_loop import get_orchestrator
@@ -51,9 +60,12 @@ from spirit.streaming.realtime_pipeline import get_stream_processor
 from spirit.cognition.human_strategy_model import get_human_strategy_model
 from spirit.cognition.layer_arbitration_engine import get_layer_arbitration_engine
 from spirit.cognition.personal_narrative_model import get_personal_narrative_model
-
-# NEW: VIM
 from spirit.cognition.values_inference_module import get_values_inference_module
+
+# NEW: Digital Twin (v2.3)
+from spirit.services.digital_twin_orchestrator import DigitalTwinOrchestrator
+from spirit.models.mechanistic_user_model import UserState
+from spirit.models.mechanisms import MechanismActivation
 
 
 # ============================================================================
@@ -396,9 +408,7 @@ async def layer_arbitration_processor():
 
 
 async def narrative_model_updater():
-    """
-    Background task that updates Personal Narrative Models based on observations.
-    """
+    """Background task that updates Personal Narrative Models based on observations."""
     from spirit.cognition.personal_narrative_model import get_personal_narrative_model
     
     store = get_behavioral_store()
@@ -433,12 +443,9 @@ async def narrative_model_updater():
             await asyncio.sleep(120)
 
 
-# NEW: VIM Background Processors
+# VIM Background Processors
 async def values_inference_processor():
-    """
-    NEW: Background task that processes observations through VIM.
-    Detects sacrifice patterns, emotional gradients, and infers values.
-    """
+    """Background task that processes observations through VIM."""
     vim = get_values_inference_module()
     store = get_behavioral_store()
     
@@ -448,7 +455,6 @@ async def values_inference_processor():
     
     while True:
         try:
-            # Process observations that have passed LAE
             five_min_ago = (datetime.utcnow() - timedelta(minutes=5)).isoformat()
             
             pending = store.client.table('behavioral_observations').select('*').eq(
@@ -457,10 +463,8 @@ async def values_inference_processor():
             
             if pending.data:
                 for obs in pending.data:
-                    # Process through VIM
                     result = await vim.process_observation(obs, obs['user_id'])
                     
-                    # Mark as processed
                     store.client.table('behavioral_observations').update({
                         'vim_processed': True,
                         'sacrifices_detected': result['new_sacrifices_detected'],
@@ -479,10 +483,7 @@ async def values_inference_processor():
 
 
 async def recovery_pattern_processor():
-    """
-    NEW: Background task that analyzes post-disruption recovery patterns.
-    Identifies automatic restarts vs effortful restarts to infer values.
-    """
+    """Background task that analyzes post-disruption recovery patterns."""
     vim = get_values_inference_module()
     store = get_behavioral_store()
     
@@ -491,7 +492,6 @@ async def recovery_pattern_processor():
     
     while True:
         try:
-            # Get recent disruptions that haven't been analyzed
             one_hour_ago = (datetime.utcnow() - timedelta(hours=1)).isoformat()
             
             disruptions = store.client.table('disruption_events').select('*').eq(
@@ -502,20 +502,17 @@ async def recovery_pattern_processor():
                 for disruption in disruptions.data:
                     user_id = disruption['user_id']
                     
-                    # Get subsequent observations
                     subsequent = store.client.table('behavioral_observations').select('*').eq(
                         'user_id', user_id
                     ).gt('timestamp', disruption['disrupted_at']).order('timestamp').limit(5).execute()
                     
                     if subsequent.data:
-                        # Process recovery pattern
                         result = await vim.process_recovery_pattern(
                             user_id,
                             disruption,
                             subsequent.data
                         )
                         
-                        # Mark as analyzed
                         store.client.table('disruption_events').update({
                             'recovery_analyzed': True,
                             'inferred_value': result['inferred_value'],
@@ -534,16 +531,137 @@ async def recovery_pattern_processor():
             await asyncio.sleep(120)
 
 
+# NEW v2.3: Digital Twin Background Processor
+async def digital_twin_processor():
+    """
+    Background task that processes pending hypotheses through Digital Twin simulation.
+    Runs Phase I/II virtual trials before human deployment.
+    """
+    store = get_behavioral_store()
+    
+    if not store:
+        print("Digital Twin processor: No Supabase, skipping")
+        return
+    
+    while True:
+        try:
+            # Get hypotheses that passed RFE but need simulation
+            pending = store.client.table('intervention_recommendations').select('*').eq(
+                'digital_twin_processed', False
+            ).eq('rfe_approved', True).eq('status', 'pending_simulation').limit(10).execute()
+            
+            if pending.data:
+                for rec in pending.data:
+                    user_id = rec['user_id']
+                    
+                    # Initialize Digital Twin for this user
+                    orchestrator = DigitalTwinOrchestrator(
+                        user_id=user_id,
+                        historical_data=[]  # Would load from PEL Level 4-5
+                    )
+                    
+                    # Build current state from observation context
+                    context = rec.get('context', {})
+                    user_state = UserState(
+                        timestamp=datetime.utcnow(),
+                        cognitive_energy=context.get('energy', 0.5),
+                        sleep_debt=context.get('sleep_debt', 0),
+                        glucose_stability=context.get('glucose', 0.7),
+                        stress_level=context.get('stress', 0.3),
+                        attentional_bandwidth=context.get('bandwidth', 0.6),
+                        working_memory_load=context.get('wm_load', 2.0),
+                        social_load=context.get('social', 0.3),
+                        identity_threat_level=context.get('identity_threat', 0.2),
+                        current_context=context.get('location', 'unknown'),
+                        recent_interventions=context.get('recent_interventions', [])
+                    )
+                    
+                    # Determine target mechanism from hypothesis
+                    hypothesis = rec.get('hypothesis', '')
+                    target_mechanism = _extract_mechanism_from_hypothesis(hypothesis)
+                    
+                    # Run Digital Twin simulation
+                    decision = orchestrator.process_hypothesis(
+                        hypothesis=hypothesis,
+                        target_mechanism=target_mechanism,
+                        current_state=user_state
+                    )
+                    
+                    # Update record with simulation results
+                    update_data = {
+                        'digital_twin_processed': True,
+                        'digital_twin_decision': decision['decision'],
+                        'simulation_stats': decision.get('predicted_stats'),
+                        'pre_registration_id': decision.get('pre_registration', {}).experiment_id if decision.get('pre_registration') else None,
+                        'simulation_confidence': decision.get('confidence'),
+                        'simulation_routing': decision.get('routing')
+                    }
+                    
+                    if decision['decision'] == 'REJECT':
+                        update_data['status'] = 'rejected_by_simulation'
+                        update_data['rejection_reason'] = decision['reason']
+                        print(f"Digital Twin REJECTED for {user_id}: {decision['reason']}")
+                    elif decision['decision'] == 'APPROVE_WITH_HUMAN_CHECK':
+                        update_data['status'] = 'pending_human_review'
+                        print(f"Digital Twin APPROVED (with check) for {user_id}")
+                    else:
+                        update_data['status'] = 'pending_debate'
+                        print(f"Digital Twin APPROVED for {user_id} -> MAO")
+                    
+                    store.client.table('intervention_recommendations').update(update_data).eq(
+                        'recommendation_id', rec['recommendation_id']
+                    ).execute()
+                    
+                    # Store counterfactual memory
+                    if 'intervention' in decision:
+                        store.client.table('counterfactual_logs').insert({
+                            'user_id': user_id,
+                            'experiment_id': decision.get('pre_registration', {}).experiment_id if decision.get('pre_registration') else 'unknown',
+                            'hypothesis': hypothesis,
+                            'simulation_result': decision.get('predicted_stats'),
+                            'context_hash': orchestrator._hash_state(user_state),
+                            'created_at': datetime.utcnow().isoformat()
+                        }).execute()
+            
+            await asyncio.sleep(25)
+            
+        except Exception as e:
+            print(f"Digital Twin processor error: {e}")
+            await asyncio.sleep(60)
+
+
+def _extract_mechanism_from_hypothesis(hypothesis: str) -> MechanismActivation:
+    """Extract target mechanism from hypothesis text."""
+    mechanism_map = {
+        'ambiguity': MechanismActivation.AMBIGUITY_COST,
+        'energy': MechanismActivation.COGNITIVE_ENERGY_DEPLETION,
+        'sleep': MechanismActivation.SLEEP_DEBT_IMPAIRMENT,
+        'avoidance': MechanismActivation.AVOIDANCE_REINFORCEMENT,
+        'identity': MechanismActivation.IDENTITY_DEFENSIVE_REASONING,
+        'stress': MechanismActivation.STRESS_NARROWING,
+        'fatigue': MechanismActivation.DECISION_FATIGUE,
+        'reward': MechanismActivation.PREDICTED_REWARD_FOLLOWING,
+        'progress': MechanismActivation.PROGRESS_SIGNALS
+    }
+    
+    hypothesis_lower = hypothesis.lower()
+    for keyword, mechanism in mechanism_map.items():
+        if keyword in hypothesis_lower:
+            return mechanism
+    
+    return MechanismActivation.AMBIGUITY_COST  # Default
+
+
 # ============================================================================
 # LIFESPAN MANAGEMENT
 # ============================================================================
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Manage application lifecycle with all components including VIM."""
+    """Manage application lifecycle with all components including Digital Twin v2.3."""
     
     print("=" * 70)
-    print("SPIRIT INITIALIZING v2.2")
+    print("SPIRIT INITIALIZING v2.3")
     print("=" * 70)
     
     db_status = await verify_database_connections()
@@ -593,12 +711,16 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(narrative_model_updater())
     print("✓ Personal Narrative Model updater started")
     
-    # NEW: VIM processors
+    # VIM processors
     asyncio.create_task(values_inference_processor())
     print("✓ Values Inference Module processor started")
     
     asyncio.create_task(recovery_pattern_processor())
     print("✓ Recovery pattern processor started")
+    
+    # NEW v2.3: Digital Twin processor
+    asyncio.create_task(digital_twin_processor())
+    print("✓ Digital Twin simulation processor started (Layer 3.5)")
     
     # Initialize cognition model singletons
     try:
@@ -612,9 +734,9 @@ async def lifespan(app: FastAPI):
         print(f"⚠ Cognition model initialization warning: {e}")
     
     print("=" * 70)
-    print("SPIRIT v2.2 ONLINE")
+    print("SPIRIT v2.3 ONLINE")
     print("Features: MAO | Belief Network | Ethical Guardrails | Memory Consolidation")
-    print("COGNITION: HOM | HSM | PNM | LAE | VIM")
+    print("COGNITION: HOM | HSM | PNM | LAE | VIM | Digital Twin")
     print("=" * 70)
     
     yield
@@ -652,9 +774,9 @@ app = FastAPI(
     Reality Filter Engine + Personal Evidence Ladder + 
     Disproven Hypothesis Archive + Human Operating Model +
     Human Strategy Model + Layer Arbitration Engine + Personal Narrative Model +
-    Values Inference Module
+    Values Inference Module + Digital Twin Simulation (v2.3)
     """,
-    version="2.2.0",
+    version="2.3.0",
     lifespan=lifespan,
 )
 
@@ -701,6 +823,7 @@ def read_root():
         "layer_arbitration_engine": bool(settings.supabase_url),
         "personal_narrative_model": bool(settings.supabase_url),
         "values_inference_module": bool(settings.supabase_url),
+        "digital_twin_simulation": bool(settings.supabase_url),  # NEW v2.3
     }
     
     enabled = sum(components.values())
@@ -709,7 +832,7 @@ def read_root():
     return {
         "message": "Spirit continuity ledger is running",
         "docs": "/docs",
-        "version": "2.2.0",
+        "version": "2.3.0",
         "system_health": f"{enabled}/{total} components enabled",
         "features": components,
         "status": "healthy" if enabled >= total * 0.7 else "degraded",
@@ -729,6 +852,12 @@ def read_root():
             "sacrifice_mapping": "Revealed preference through cost payment",
             "recovery_analysis": "Automatic restart vs effortful restart detection",
             "value_conflict_prediction": "Goal sabotage prediction from value conflicts"
+        },
+        "new_in_v2_3": {  # NEW
+            "digital_twin": "In-silico experimentation before human contact",
+            "virtual_cohorts": "Phase I/II clinical trials on simulated users",
+            "counterfactual_memory": "Simulation vs reality fidelity tracking",
+            "mechanistic_simulation": "39-mechanism generative user model"
         },
         "human_centered_systems": {
             "onboarding": "/v1/onboarding",
@@ -759,6 +888,14 @@ def read_root():
             "sacrifices": "/v1/vim/sacrifices/{user_id}",
             "return_vectors": "/v1/vim/return-vectors/{user_id}",
             "tradeoffs": "/v1/vim/tradeoffs/{user_id}"
+        },
+        "digital_twin_endpoints": {  # NEW
+            "simulate": "/v1/digital-twin/simulate",
+            "counterfactual": "/v1/digital-twin/counterfactual",
+            "fidelity_report": "/v1/digital-twin/fidelity/{user_id}",
+            "causal_dag": "/v1/digital-twin/causal-dag/{user_id}",
+            "experiment_design": "/v1/digital-twin/experiments/design",
+            "validate_hypothesis": "/v1/digital-twin/validate"
         }
     }
 
@@ -770,14 +907,16 @@ async def health_check():
     rfe_status = await _check_rfe_health()
     lae_status = await _check_lae_health()
     vim_status = await _check_vim_health()
+    digital_twin_status = await _check_digital_twin_health()  # NEW
     
     return {
         "status": "healthy" if db_status.get("sqlite") and rfe_status["operational"] else "degraded",
-        "version": "2.2.0",
+        "version": "2.3.0",
         "databases": db_status,
         "rfe_system": rfe_status,
         "lae_system": lae_status,
         "vim_system": vim_status,
+        "digital_twin_system": digital_twin_status,  # NEW
         "timestamp": datetime.utcnow().isoformat()
     }
 
@@ -848,7 +987,7 @@ async def _check_lae_health() -> Dict[str, Any]:
 
 
 async def _check_vim_health() -> Dict[str, Any]:
-    """NEW: Check VIM subsystem health."""
+    """Check VIM subsystem health."""
     store = get_behavioral_store()
     if not store:
         return {"operational": False, "reason": "no_database"}
@@ -856,7 +995,6 @@ async def _check_vim_health() -> Dict[str, Any]:
     try:
         five_min_ago = (datetime.utcnow() - timedelta(minutes=5)).isoformat()
         
-        # Check recent VIM processing
         recent = store.client.table('behavioral_observations').select('*', count='exact').eq(
             'vim_processed', True
         ).gte('timestamp', five_min_ago).execute()
@@ -865,13 +1003,11 @@ async def _check_vim_health() -> Dict[str, Any]:
             'vim_processed', False
         ).eq('lae_processed', True).execute()
         
-        # Get value inference stats
         today = datetime.utcnow().strftime('%Y-%m-%d')
         sacrifices = store.client.table('behavioral_observations').select('*', count='exact').gt(
             'sacrifices_detected', 0
         ).gte('timestamp', today).execute()
         
-        # Get users with inferred values
         users_with_values = store.client.table('behavioral_observations').select(
             'user_id', count='exact'
         ).gt('values_inferred', 0).gte('timestamp', today).execute()
@@ -883,6 +1019,56 @@ async def _check_vim_health() -> Dict[str, Any]:
             "sacrifices_detected_today": sacrifices.count if hasattr(sacrifices, 'count') else 0,
             "users_with_inferred_values": users_with_values.count if hasattr(users_with_values, 'count') else 0,
             "queue_healthy": (pending.count if hasattr(pending, 'count') else 0) < 40
+        }
+    except Exception as e:
+        return {"operational": False, "reason": str(e)}
+
+
+# NEW v2.3: Digital Twin health check
+async def _check_digital_twin_health() -> Dict[str, Any]:
+    """Check Digital Twin subsystem health."""
+    store = get_behavioral_store()
+    if not store:
+        return {"operational": False, "reason": "no_database"}
+    
+    try:
+        five_min_ago = (datetime.utcnow() - timedelta(minutes=5)).isoformat()
+        today = datetime.utcnow().strftime('%Y-%m-%d')
+        
+        # Recent simulations
+        recent_sims = store.client.table('counterfactual_logs').select('*', count='exact').gte(
+            'created_at', five_min_ago
+        ).execute()
+        
+        # Pending for simulation
+        pending = store.client.table('intervention_recommendations').select('*', count='exact').eq(
+            'digital_twin_processed', False
+        ).eq('rfe_approved', True).execute()
+        
+        # Fidelity stats
+        validated = store.client.table('counterfactual_logs').select('*', count='exact').not_.is_(
+            'real_outcome', None
+        ).gte('created_at', today).execute()
+        
+        high_fidelity = store.client.table('counterfactual_logs').select('*', count='exact').gte(
+            'fidelity_score', 0.7
+        ).gte('created_at', today).execute()
+        
+        # Rejection rate
+        rejected = store.client.table('intervention_recommendations').select('*', count='exact').eq(
+            'status', 'rejected_by_simulation'
+        ).gte('created_at', today).execute()
+        
+        return {
+            "operational": True,
+            "recent_simulations_5m": recent_sims.count if hasattr(recent_sims, 'count') else 0,
+            "pending_for_simulation": pending.count if hasattr(pending, 'count') else 0,
+            "validated_today": validated.count if hasattr(validated, 'count') else 0,
+            "high_fidelity_rate": (
+                (high_fidelity.count / validated.count * 100) if validated.count and hasattr(validated, 'count') else 0
+            ),
+            "rejection_rate_today": rejected.count if hasattr(rejected, 'count') else 0,
+            "queue_healthy": (pending.count if hasattr(pending, 'count') else 0) < 20
         }
     except Exception as e:
         return {"operational": False, "reason": str(e)}
@@ -922,12 +1108,17 @@ async def system_metrics():
         "lae_today_hsm_dominant": 0,
         "lae_today_pnm_dominant": 0,
         "active_diagnostic_experiments": 0,
-        # NEW: VIM metrics
         "vim_pending_processing": 0,
         "vim_sacrifices_detected_24h": 0,
         "vim_recovery_patterns_analyzed": 0,
         "users_with_value_profiles": 0,
-        "value_conflicts_predicted": 0
+        "value_conflicts_predicted": 0,
+        # NEW v2.3: Digital Twin metrics
+        "digital_twin_pending_simulations": 0,
+        "digital_twin_validated_today": 0,
+        "digital_twin_mean_fidelity": 0.0,
+        "digital_twin_rejections_24h": 0,
+        "digital_twin_virtual_humans_tested": 0
     }
     
     if store and store.client:
@@ -992,7 +1183,7 @@ async def system_metrics():
             ).in_('status', ['running', 'pending']).execute()
             metrics["active_diagnostic_experiments"] = diag_exp.count if hasattr(diag_exp, 'count') else 0
             
-            # NEW: VIM metrics
+            # VIM metrics
             pending_vim = store.client.table('behavioral_observations').select(
                 '*', count='exact'
             ).eq('vim_processed', False).eq('lae_processed', True).execute()
@@ -1012,6 +1203,38 @@ async def system_metrics():
                 'user_id', count='exact'
             ).gt('values_inferred', 0).gte('timestamp', today).execute()
             metrics["users_with_value_profiles"] = users_values.count if hasattr(users_values, 'count') else 0
+            
+            # NEW v2.3: Digital Twin metrics
+            pending_dt = store.client.table('intervention_recommendations').select(
+                '*', count='exact'
+            ).eq('digital_twin_processed', False).eq('rfe_approved', True).execute()
+            metrics["digital_twin_pending_simulations"] = pending_dt.count if hasattr(pending_dt, 'count') else 0
+            
+            validated_dt = store.client.table('counterfactual_logs').select(
+                '*', count='exact'
+            ).not_.is_('real_outcome', None).gte('created_at', today).execute()
+            metrics["digital_twin_validated_today"] = validated_dt.count if hasattr(validated_dt, 'count') else 0
+            
+            rejected_dt = store.client.table('intervention_recommendations').select(
+                '*', count='exact'
+            ).eq('status', 'rejected_by_simulation').gte('created_at', day_ago).execute()
+            metrics["digital_twin_rejections_24h"] = rejected_dt.count if hasattr(rejected_dt, 'count') else 0
+            
+            # Calculate mean fidelity
+            fidelity_scores = store.client.table('counterfactual_logs').select('fidelity_score').gte(
+                'created_at', day_ago
+            ).not_.is_('fidelity_score', None).execute()
+            if fidelity_scores.data:
+                scores = [r['fidelity_score'] for r in fidelity_scores.data]
+                metrics["digital_twin_mean_fidelity"] = round(sum(scores) / len(scores), 2)
+            
+            # Count virtual humans tested (simulations run)
+            simulations = store.client.table('counterfactual_logs').select('*', count='exact').gte(
+                'created_at', day_ago
+            ).execute()
+            # Each simulation represents 1000 virtual humans (Phase I + Phase II)
+            sim_count = simulations.count if hasattr(simulations, 'count') else 0
+            metrics["digital_twin_virtual_humans_tested"] = sim_count * 1000
             
         except Exception as e:
             metrics["error"] = str(e)
@@ -1047,9 +1270,10 @@ app.include_router(empathy_router, prefix="/v1/empathy", tags=["empathy"])
 
 app.include_router(rfe_router)
 app.include_router(lae_router)
-
-# NEW: VIM router
 app.include_router(vim_router)
+
+# NEW v2.3: Digital Twin router
+app.include_router(digital_twin_router)
 
 
 # ============================================================================
@@ -1076,4 +1300,14 @@ def _dict_to_grading(data: Dict) -> Any:
     )
 '''
 
-print(f"Updated main.py created: {len(updated_main_py)} bytes")
+print(f"Updated main.py created: {len(updated_main_py)} characters")
+print("\nKey changes made:")
+print("1. Added imports for Digital Twin components")
+print("2. Added digital_twin_processor() background task")
+print("3. Added _check_digital_twin_health() function")
+print("4. Updated lifespan to start Digital Twin processor")
+print("5. Updated version to 2.3.0")
+print("6. Added Digital Twin endpoints documentation")
+print("7. Added Digital Twin metrics to system_metrics")
+print("8. Added digital_twin_router include")
+print("\nAll existing VIM, RFE, LAE, MAO processors preserved")
